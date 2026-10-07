@@ -1,0 +1,116 @@
+.ns-tab-item {
+    .ns-table {
+        thead {
+            th {
+                @apply text-fontcolor border-tab-table-th-edge;
+            }
+        }
+        tbody {
+            @apply text-fontcolor;
+            tr:not([class]) {
+                td {
+                    @apply border-tab-table-th-edge text-fontcolor;
+                }
+            }
+        }
+    }
+}
+
+.ns-table {
+    @apply w-full;
+    thead {
+        @apply border-table-th-edge text-sm;
+        th {
+            @apply bg-table-th text-fontcolor border-table-th-edge;
+        }
+        tr.error > th, tr.error td {
+            @apply bg-error-tertiary text-white border-table-th-edge;
+        }
+        tr.success > th, tr.success td {
+            @apply bg-success-tertiary text-white border-table-th-edge;
+        }
+        tr.info > th, tr.info td {
+            @apply bg-[#0dcaf0] text-white border-table-th-edge;
+        }
+        tr.warning > th, tr.warning td {
+            @apply bg-warning-tertiary text-white border-table-th-edge;
+        }
+    }
+    tbody, tfoot {
+        @apply text-fontcolor border-table-th-edge text-sm;
+
+        tr {
+            @apply border-table-th-edge;
+            td {
+                @apply border-table-th-edge;
+                &.info {
+                    @apply border-info-secondary bg-[#0dcaf0] text-white;
+                }
+                &.error {
+                    @apply border-error-secondary bg-error-primary text-white;
+                }
+                &.success {
+                    @apply border-success-secondary bg-success-primary text-white;
+                }
+                &.warning {
+                    @apply border-warning-secondary bg-warning-primary/50 text-white;
+                }
+            }
+        }
+
+        td {
+            @apply border-table-th-edge;
+        }
+
+        tr.info {
+            @apply bg-info-tertiary/30 text-white;
+        }
+    
+        tr.error {
+            @apply bg-error-primary/30 text-white;
+        }
+    
+        tr.success {
+            @apply bg-success-tertiary/30 text-white;
+        }
+    
+        tr.warning {
+            @apply bg-warning-tertiary/30 text-white;
+        }
+        
+        .ns-inset-button {
+            @apply border-input-edge;
+            &.active, &:hover {
+                @apply border-transparent;
+            }
+        }
+    }
+}
+
+/**
+ * A list carrying many columns, rendered smaller and tighter so the whole register fits a screen
+ * instead of being cut down to fit. ns-crud applies this once a list passes a dozen columns.
+ *
+ * The purchase list needs eighteen: receiving checks the supplier's delivery note against the goods
+ * and accounts pays against the supplier's billing note, and each document carries both a number and
+ * a date of its own. Written as plain declarations rather than @apply so the padding and the size win
+ * over the utility classes already on the cells.
+ */
+.ns-table-compact {
+    thead th {
+        font-size: 11px;
+        line-height: 1.25;
+        padding: 2px 4px;
+    }
+    tbody td {
+        font-size: 11px;
+        line-height: 1.3;
+        padding: 2px 4px;
+    }
+    tbody .ns-inset-button {
+        font-size: 11px;
+        width: auto;
+        padding-left: 0.4rem;
+        padding-right: 0.4rem;
+    }
+}

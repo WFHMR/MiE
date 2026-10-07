@@ -1,0 +1,2 @@
+@includeWhen( request()->query( 'dash-visibility' ) === 'disabled', 'pages.dashboard.orders.templates._naked_tax_invoice' )
+@includeWhen( empty( request()->query( 'dash-visibility' ) ), 'pages.dashboard.orders.templates._dashboard_tax_invoice' )

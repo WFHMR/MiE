@@ -1,0 +1,1 @@
+{{ ['draft'=>'ฉบับร่าง','issued'=>'ออกใบเสนอราคาแล้ว','accepted'=>'ลูกค้ายืนยันแล้ว','confirmed'=>'ยืนยันแล้ว','preparing'=>'เตรียมส่ง','dispatched'=>'ส่งแล้ว / รอรับมอบ','delivered'=>'รับมอบแล้ว','cancelled'=>'ยกเลิก'][$status] ?? $status }}

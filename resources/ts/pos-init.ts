@@ -1,0 +1,2519 @@
+import { couponValue } from './libraries/coupon-pricing';
+import { ProductQuantityPromise } from "./pages/dashboard/pos/queues/products/product-quantity";
+import { ProductUnitPromise } from "./pages/dashboard/pos/queues/products/product-unit";
+import { CustomerQueue } from "./pages/dashboard/pos/queues/order/customer-queue";
+import { PaymentQueue } from "./pages/dashboard/pos/queues/order/payment-queue";
+import { ProductsQueue } from "./pages/dashboard/pos/queues/order/products-queue";
+import { TypeQueue } from "./pages/dashboard/pos/queues/order/type-queue";
+import { BehaviorSubject } from "rxjs";
+import { Customer } from "./interfaces/customer";
+import { OrderType } from "./interfaces/order-type";
+import { Order } from "./interfaces/order";
+import { nsHttpClient, nsNotice, nsSnackBar } from "./bootstrap";
+import { PaymentType } from "./interfaces/payment-type";
+import { Payment } from "./interfaces/payment";
+import { Responsive } from "./libraries/responsive";
+import { Popup } from "./libraries/popup";
+import { OrderProduct } from "./interfaces/order-product";
+import { StatusResponse } from "./status-response";
+import { __ } from "./libraries/lang";
+import { ProductUnitQuantity } from "./interfaces/product-unit-quantity";
+import { StockUpdate } from "./interfaces/stock-update";
+import { nsRawCurrency } from "./filters/currency";
+import moment from "moment";
+import { defineAsyncComponent } from "vue";
+import { nsCurrency } from "./filters/currency";
+import Print from "./libraries/print";
+import Tax from "./libraries/tax";
+import * as math from "mathjs"
+import nsPosLoadingPopupVue from "./popups/ns-pos-loading-popup.vue";
+import { nsAlertPopup, nsConfirmPopup, nsPromptPopup } from "./components/components";
+import nsPosShippingPopup from "./popups/ns-pos-shipping-popup.vue";
+import nsLayawayPopup from "./popups/ns-pos-layaway-popup.vue";
+import delivery from "./pages/dashboard/pos/queues/order-type/delivery";
+import axios from "axios";
+import { io, Socket } from "socket.io-client";
+import { ReactiveObject } from "./libraries/reactive-objects";
+
+/**
+ * these are dynamic component
+ * that are loaded conditionally
+ */
+const nsPosDashboardButton      = (<any>window).nsPosDashboardButton = defineAsyncComponent( () => import('./pages/dashboard/pos/header-buttons/ns-pos-dashboard-button.vue' ) );
+const nsPosPendingOrderButton   = (<any>window).nsPosPendingOrderButton = defineAsyncComponent( () => import('./pages/dashboard/pos/header-buttons/ns-pos-' + 'pending-orders' + '-button.vue' ) );
+const nsPosOrderTypeButton      = (<any>window).nsPosOrderTypeButton = defineAsyncComponent( () => import('./pages/dashboard/pos/header-buttons/ns-pos-' + 'order-type' + '-button.vue' ) );
+const nsPosCustomersButton      = (<any>window).nsPosCustomersButton = defineAsyncComponent( () => import('./pages/dashboard/pos/header-buttons/ns-pos-' + 'customers' + '-button.vue' ) );
+const nsPosResetButton          = (<any>window).nsPosResetButton = defineAsyncComponent( () => import('./pages/dashboard/pos/header-buttons/ns-pos-' + 'reset' + '-button.vue' ) );
+const nsPosCashRegister         = (<any>window).nsPosCashRegister = defineAsyncComponent( () => import('./pages/dashboard/pos/header-buttons/ns-pos-' + 'registers' + '-button.vue' ) );
+
+(<any>window).nsLayawayPopup        = nsLayawayPopup;
+(<any>window).nsPosShippingPopup    = nsPosShippingPopup;
+
+( window as any ).CustomerQueue     =   CustomerQueue;
+( window as any ).PaymentQueue      =   PaymentQueue;
+( window as any ).ProductsQueue     =   ProductsQueue;
+( window as any ).TypeQueue         =   TypeQueue;
+
+declare const systemOptions;
+declare const systemUrls;
+declare const nsEvent;
+declare const nsHooks;
+declare const nsSnackBar;
+
+export class POS {
+    private _cartButtons: BehaviorSubject<{ [key: string]: any }>;
+    private _cartHeaderButtons: BehaviorSubject<{ [key: string]: any }>;
+    private _products: BehaviorSubject<OrderProduct[]>;
+    private _breadcrumbs: BehaviorSubject<any[]>;
+    private _customers: BehaviorSubject<Customer[]>;
+    private _settings: BehaviorSubject<{ [key: string]: any }>;
+    private _types: BehaviorSubject<OrderType[]>;
+    private _orderTypeProcessQueue: { identifier: string, promise: (selectedType: OrderType) => Promise<StatusResponse> }[] = [];
+    private _paymentsType: BehaviorSubject<PaymentType[]>;
+    private _order: BehaviorSubject<Order>;
+    private _screen: BehaviorSubject<string>;
+    private _holdPopupEnabled = true;
+    private _initialQueue: (() => Promise<StatusResponse>)[] = [];
+    private _options: BehaviorSubject<{ [key: string]: any }>;
+    private _responsive = new Responsive;
+    private _visibleSection: BehaviorSubject<'cart' | 'grid' | 'both'>;
+    private _isSubmitting = false;
+    private _processingAddQueue = false;
+    private _selectedPaymentType: BehaviorSubject<PaymentType>;
+    private _userPermissions: BehaviorSubject<{[key:string]: any}[]>;
+    private _wirelessBarcodeState: ReactiveObject<{[key:string]: any}[]>;
+    private wirelessSocket: Socket | null = null;
+
+    /**
+     * Stock changes announced by the server, so a sale on one till reaches the
+     * others. Emits null until the first message arrives.
+     */
+    private _stockUpdate: BehaviorSubject<StockUpdate | null> = new BehaviorSubject<StockUpdate | null>( null );
+    private stockChannelRetry: any = null;
+
+    public print: Print;
+
+    private defaultOrder = (): Order => {
+        const order: Order = {
+            discount_type: null,
+            title: '',
+            discount: 0,
+            register_id: this.get('register') ? this.get('register').id : undefined, // everytime it reset, this value will be pulled.
+            discount_percentage: 0,
+            subtotal: 0,
+            total: 0,
+            coupons: [],
+            total_coupons: 0,
+            tendered: 0,
+            note: '',
+            note_visibility: 'hidden',
+            tax_group_id: undefined,
+            tax_type: undefined,
+            taxes: [],
+            tax_group: {},
+            payment_status: undefined,
+            customer_id: undefined,
+            change: 0,
+            total_products: 0,
+            shipping: 0,
+            tax_value: 0,
+            products_tax_value: 0,
+            shipping_rate: 0,
+            shipping_type: undefined,
+            customer: undefined,
+            type: undefined,
+            products: [],
+            instalments: [],
+            payments: [],
+            addresses: {
+                shipping: undefined,
+                billing: undefined
+            }
+        }
+
+        return order;
+    }
+
+    constructor() {
+        this.initialize();
+        /**
+         * systemUrls and systemOptions are page globals declared by the orders pages only.
+         * On the POS page they do not exist at all, so reading them directly here aborted the
+         * whole module before window.POS was ever assigned. typeof keeps that read safe, and
+         * the real values arrive through defineSettings()/defineOptions() a moment later.
+         */
+        this.print  =   new Print({
+            urls: typeof systemUrls !== 'undefined' ? systemUrls : {},
+            options: typeof systemOptions !== 'undefined' ? systemOptions : {}
+        });
+
+        /**
+         * Keeps the cart's stock snapshot in step with the other tills. The grid
+         * handles its own product list separately, since only it knows which
+         * category is on screen.
+         */
+        this._stockUpdate.subscribe( ( update: StockUpdate | null ) => {
+            if ( update !== null ) {
+                this.applyStockUpdateToCart( update );
+            }
+        });
+
+        this.listenToStockUpdates();
+    }
+
+    get screen() {
+        return this._screen;
+    }
+
+    get visibleSection() {
+        return this._visibleSection;
+    }
+
+    get paymentsType() {
+        return this._paymentsType;
+    }
+
+    get selectedPaymentType() {
+        return this._selectedPaymentType;
+    }
+
+    get order() {
+        return this._order;
+    }
+
+    get types() {
+        return this._types;
+    }
+
+    get products() {
+        return this._products;
+    }
+
+    get stockUpdate() {
+        return this._stockUpdate;
+    }
+
+    get customers() {
+        return this._customers;
+    }
+
+    get options() {
+        return this._options;
+    }
+
+    get orderTypeQueue() {
+        return this._orderTypeProcessQueue;
+    }
+
+    get settings() {
+        return this._settings;
+    }
+
+    get breadcrumbs() {
+        return this._breadcrumbs;
+    }
+
+    get initialQueue() {
+        return this._initialQueue;
+    }
+
+    get responsive() {
+        return this._responsive;
+    }
+
+    get processingAddQueue() {
+        return this._processingAddQueue;
+    }
+
+    get cartButtons() {
+        return this._cartButtons;
+    }
+
+    get cartHeaderButtons() {
+        return this._cartHeaderButtons;
+    }
+
+    async reset() {
+        return new Promise(async (resolve, reject) => {
+            try {
+                this._isSubmitting = false;
+
+                /**
+                 * A new sale must not inherit the last one's payment fingerprint, or the first
+                 * payment of the next customer could be refused for resembling the previous one.
+                 */
+                this._lastPaymentSignature = '';
+                this._lastPaymentAddedAt = 0;
+
+                /**
+                 * to reset order details
+                 */
+                this.order.next(this.defaultOrder());
+                this.products.next([]);
+                this._customers.next([]);
+                this._breadcrumbs.next([]);
+                this._cartButtons.next({});
+                this._cartHeaderButtons.next({});
+                this.defineCurrentScreen();
+                this.setHoldPopupEnabled(true);
+
+                nsHooks.doAction( 'ns-before-cart-reset' );
+
+                
+                await this.processInitialQueue();
+
+                nsHooks.doAction( 'ns-after-cart-changed' );
+                nsHooks.doAction( 'ns-after-cart-reset' );
+
+                resolve( true );
+            } catch ( exception ) {
+                reject( exception );
+            }
+        });
+    }
+
+    public initialize() {
+        this._userPermissions = new BehaviorSubject<{ [key: string]: any }[]>([]);
+        this._products = new BehaviorSubject<OrderProduct[]>([]);
+        this._customers = new BehaviorSubject<Customer[]>([]);
+        this._types = new BehaviorSubject<OrderType[]>([]);
+        this._breadcrumbs = new BehaviorSubject<any[]>([]);
+        this._screen = new BehaviorSubject<string>('');
+        this._paymentsType = new BehaviorSubject<PaymentType[]>([]);
+        this._visibleSection = new BehaviorSubject('both');
+        this._options = new BehaviorSubject({});
+        this._settings = new BehaviorSubject<{ [key: string]: any }>({});
+        this._order = new BehaviorSubject<Order>(this.defaultOrder());
+        this._selectedPaymentType = new BehaviorSubject<PaymentType>(null);
+        this._cartButtons = new BehaviorSubject<{ [key: string]: any }>({})
+        this._cartHeaderButtons = new BehaviorSubject<{ [key: string]: any }>({});
+        this._orderTypeProcessQueue = [
+            delivery,
+        ];
+
+        this._wirelessBarcodeState = new ReactiveObject({
+            socket_status: 'disconnected',
+            http_status: 'pending',
+            channel: null,
+            secret: null, 
+            domain: null,
+            clients: [],
+            barcode: '',
+        });
+
+        this.initialQueue.push(() => new Promise((resolve, reject) => {
+            nsHttpClient.get(`/api/users/permissions/` ).subscribe({
+                next: (response: any) => {
+                    this._userPermissions.next(response);
+                    resolve( response );
+                },
+                error: error => {
+                    reject( error );
+                }
+            })
+        }));
+
+        /**
+         * This initial process will try to detect
+         * if there is a tax group assigned on the settings
+         * and set it as default tax group.
+         */
+        this.initialQueue.push(() => new Promise((resolve, reject) => {
+            const options   = this.options.getValue();
+            const order     = this.order.getValue();
+
+            order.tax_type  = options.ns_pos_tax_type;
+
+            if (options.ns_pos_tax_group !== false) {
+                order.tax_group_id = options.ns_pos_tax_group;
+                this.order.next(order);
+            }
+
+            return resolve({
+                status: 'success',
+                message: 'tax group assignated'
+            });
+        }));
+
+        /**
+         * this initial process will select the default
+         * customer and assign him to the POS
+         */
+        this.initialQueue.push(() => new Promise((resolve, reject) => {
+            const options = this.options.getValue();
+            const order = this.order.getValue();
+
+            if (options.ns_customers_default !== false) {
+                nsHttpClient.get(`/api/customers/${options.ns_customers_default}`)
+                    .subscribe({
+                        next: customer => {
+                            this.selectCustomer(customer);
+                            resolve({
+                                status: 'success',
+                                message: __('The customer has been loaded')
+                            });
+                        },
+                        error: (error) => {
+                            nsNotice
+                                .error( 
+                                    __( 'เกิดข้อผิดพลาด' ),
+                                    __( 'ไม่สามารถเลือกลูกค้าเริ่มต้นได้ ลูกค้าอาจถูกลบไปแล้ว กรุณาเปลี่ยนลูกค้าเริ่มต้นในการตั้งค่า' ),
+                                    {
+                                        actions: {
+                                            close: {
+                                                label: __( 'Close' ),
+                                            }
+                                        }
+                                    })
+                            reject(error);
+                        }
+                    });
+            }
+
+            return resolve({
+                status: 'success',
+                message: __( 'No default customer is selected.' )
+            });
+        }));
+
+        /**
+         * Whenever there is a change
+         * on the products, we'll update
+         * the cart.
+         */
+        nsHooks.addAction( 'ns-after-cart-changed', 'listen-add-to-cart', () => this.refreshCart());
+
+        /**
+         * listen to type for updating
+         * the order accordingly
+         */
+        this.types.subscribe(types => {
+            const selected = Object.values(types).filter((type: any) => type.selected);
+
+            if (selected.length > 0) {
+                const order = this.order.getValue();
+                order.type = selected[0];
+                this.order.next(order);
+            }
+        });
+
+        /**
+         * We're handling here the responsive aspect
+         * of the POS.
+         */
+        window.addEventListener('resize', () => {
+            this._responsive.detect();
+            this.defineCurrentScreen();
+        });
+
+        /**
+         * This will ensure the order is not closed mistakenly.
+         * @returns void
+         */
+        window.onbeforeunload   =   () => {
+            if ( this.products.getValue().length > 0 ) {
+                return __( 'Some products has been added to the cart. Would you like to discard this order ?' );
+            }
+        }
+    }
+
+    public storeWirelessState( data )
+    {
+        const currentState = this.wirelessBarcodeState.getValue();
+
+        this._wirelessBarcodeState.next({
+            ...currentState,
+            ...data
+        });
+    }
+
+    public initWirelessBarcodeServer() {
+        const options = this.options.getValue();
+        const settings = this.settings.getValue();
+
+        if ( options.ns_pos_barcode_reader_type === 'wireless' ) {
+            const domain = settings.wireless_socket_domain;
+
+            if ( domain !== null ) {
+                /**
+                 * we'll first initialize the channel and then we'll connect or disconnect based on the current state of the connection
+                 */
+                this.wirelessBarcodeState.update({
+                    http_status: 'pending'
+                });
+
+                const request = new XMLHttpRequest;
+
+                request.open( 'POST', `https://${domain}/api/scanutility/channels`, true );
+                request.onload = () => {
+                    if ( request.status >= 200 && request.status < 300 ) {
+
+                        const response = JSON.parse( request.responseText );
+
+                        if ( Object.keys( response ).includes( 'channel' ) ) {
+                            this.wirelessBarcodeState.update({
+                                channel: response.channel,
+                                http_status: 'successful',
+                            })
+
+                            setTimeout( () => {
+                                this.startWirelessBarcodeChannel();
+                            }, 1000 );
+                        }
+                    } 
+
+                    if ( request.status === 422 ) {
+                        this.wirelessBarcodeState.update({
+                            http_status: 'error'
+                        });
+                    }
+
+                    if ( request.status >= 500 ) {
+                        this.wirelessBarcodeState.update({
+                            http_status: 'error'
+                        });
+                    }
+                }
+
+                request.setRequestHeader( 'Authorization', `Bearer ${  options.mynexopos_access_token }` );
+                request.setRequestHeader( 'Accept', 'application/json' );
+
+                request.onerror = (e) => {
+                    this.wirelessBarcodeState.update({
+                        http_status: 'error'
+                    });
+
+                    console.error( 'Failed to initialize wireless barcode reader connection.', e );
+                }
+
+                request.ontimeout = () => {
+                    this.wirelessBarcodeState.update({
+                        http_status: 'error'
+                    });
+                }
+
+                request.onabort = () => {
+                    this.wirelessBarcodeState.update({
+                        http_status: 'error'
+                    });
+                };
+
+                request.timeout = 10000; // 10 seconds timeout
+
+                request.send(JSON.stringify({
+                    'name' : `pos_${Math.random().toString(36).substring(2, 15)}`,
+                }));
+            }
+        }
+    }
+
+    public startWirelessBarcodeChannel() {
+        const wirelessState = this.wirelessBarcodeState.value;
+        const channel = wirelessState.channel;
+        const options = this.options.getValue();
+        const settings = this.settings.getValue();
+
+        if ( channel.channel_uuid && channel.password ) {
+            if ( this.wirelessSocket ) {
+                this.wirelessSocket.removeAllListeners();
+                this.wirelessSocket.disconnect();
+                this.wirelessSocket = null;
+            }
+
+            this.wirelessSocket = io( `https://${ settings.wireless_socket_domain }/scanutility`, {
+                transports: [ "websocket" ],
+                reconnection: true,
+                reconnectionAttempts: Infinity,
+                reconnectionDelay: 1000,
+                reconnectionDelayMax: 5000,
+                auth: {
+                    access_token: options.mynexopos_access_token,
+                    role: "host",
+                    license_uuid: channel.license_uuid,
+                }
+            } );
+
+            this.wirelessSocket.on( "connect", () => {
+                this._wirelessBarcodeState.update({
+                    socket_status: 'connected'
+                });
+            } );
+
+            this.wirelessSocket.on( "scanutility.authenticated", () => {
+                this.wirelessSocket.emit( 'scanutility.host.attach_channel', { channel_uuid: channel.channel_uuid, password: wirelessState.channel.password } );
+            });
+
+            this.wirelessSocket.on( "scanutility.message", ( payload ) => {
+                this.handleWirelessBarcodePayload( payload );
+            } );
+
+            this.wirelessSocket.on( "barcode", ( payload ) => {
+                this.handleWirelessBarcodePayload( payload );
+            } );
+
+            this.wirelessSocket.on( "disconnect", ( reason ) => {
+                this._wirelessBarcodeState.update({
+                    socket_status: 'disconnected'
+                });
+
+                if ( reason !== "io client disconnect" ) {
+                    nsSnackBar.error( __( "Wireless barcode reader disconnected." ) );
+                }
+            } );
+
+            this.wirelessSocket.on( "scanutility.get.channel.clients", ( response ) => {
+                this.wirelessBarcodeState.update({
+                    clients: response.clients
+                })
+            });
+
+            this.wirelessSocket.on( "connect_error", ( error ) => {
+                this._wirelessBarcodeState.update({
+                    socket_status: 'connexion_error'
+                });
+                console.error( "Socket.IO error with wireless barcode reader connection:", error );
+            } );
+ 
+            this.wirelessSocket.on( 'scanutility.channel.joined', ( data ) => {
+                const state = this.wirelessBarcodeState.getValue();
+                state.clients = state.clients || [];
+
+                this._wirelessBarcodeState.update({
+                    clients: [...state.clients, data.user]
+                });
+            });
+        }
+    }
+
+    /**
+     * Subscribes to the server's stock channel so this till learns about sales made
+     * on the other tills.
+     *
+     * Echo is created on DOMContentLoaded in the dashboard footer and only when the
+     * broadcast driver is reverb, so it may not exist yet — or at all. Rather than
+     * assume, this polls briefly for it and then gives up quietly. A shop running
+     * without Reverb keeps a working POS; it just does not get live stock, and the
+     * server still refuses to oversell because the deduction is atomic.
+     */
+    public listenToStockUpdates( attempt: number = 0 ) {
+        const echo = ( window as any ).Echo;
+
+        if ( ! echo ) {
+            /**
+             * Roughly ten seconds of retries. Beyond that the driver is not reverb and
+             * no amount of waiting will produce an Echo instance.
+             */
+            if ( attempt < 20 ) {
+                this.stockChannelRetry = setTimeout( () => this.listenToStockUpdates( attempt + 1 ), 500 );
+            }
+
+            return;
+        }
+
+        try {
+            echo.channel( 'stock' )
+                .listen( '.stock.updated', ( payload: StockUpdate ) => {
+                    this._stockUpdate.next( payload );
+                });
+        } catch ( error ) {
+            console.error( 'Unable to subscribe to the stock channel.', error );
+        }
+    }
+
+    public stopListeningToStockUpdates() {
+        if ( this.stockChannelRetry ) {
+            clearTimeout( this.stockChannelRetry );
+            this.stockChannelRetry = null;
+        }
+
+        const echo = ( window as any ).Echo;
+
+        if ( echo ) {
+            try {
+                echo.leave( 'stock' );
+            } catch ( error ) {
+                console.error( 'Unable to leave the stock channel.', error );
+            }
+        }
+    }
+
+    /**
+     * Applies a stock change to the copies of the product already sitting in the
+     * cart.
+     *
+     * The cart keeps its own snapshot of each unit quantity, and the guard that
+     * refuses to add more than the shop has reads from that snapshot. Leaving it
+     * stale would let a cashier keep adding an item another till has just sold out.
+     */
+    public applyStockUpdateToCart( update: StockUpdate ) {
+        const products = this._products.getValue();
+        let changed = false;
+
+        products.forEach( ( product: any ) => {
+            if ( product.unit_quantity_id !== update.unit_quantity_id ) {
+                return;
+            }
+
+            if ( product.unitQuantity ) {
+                product.unitQuantity.quantity = update.quantity;
+                changed = true;
+            }
+
+            const original = typeof product.$original === 'function' ? product.$original() : null;
+
+            if ( original && original.unit_quantities ) {
+                original.unit_quantities.forEach( ( unitQuantity: any ) => {
+                    if ( unitQuantity.id === update.unit_quantity_id ) {
+                        unitQuantity.quantity = update.quantity;
+                        changed = true;
+                    }
+                });
+            }
+        });
+
+        if ( changed ) {
+            this._products.next( products );
+        }
+    }
+
+    public stopWirelessBarcodeChannel() {
+        if ( this.wirelessSocket ) {
+            this.wirelessSocket.removeAllListeners();
+            this.wirelessSocket.disconnect();
+            this.wirelessSocket = null;
+            this.wirelessBarcodeState.update({
+                socket_status: 'disconnected',
+                clients: [],
+                http_status: 'stopped',
+            })
+        }
+    }
+
+    public getChannelClients( channeluuid: string ){
+        if ( this.wirelessSocket ) {
+            this.wirelessSocket.emit( 'scanutility.ask.channel.clients', { channel_uuid: channeluuid } );
+        } else {
+            nsSnackBar.info( __( 'The wireless barcode reader is not connected. Please check your connection and try again.' ) );
+        }
+    }
+
+    private handleWirelessBarcodePayload( message: any ) {
+        if ( message.type === 'barcode.scanned' ) {
+            this.wirelessBarcodeState.update({
+                barcode: message.payload.barcode
+            });
+        }
+    }
+
+    public getSalePrice(item) {
+        let price = 0;
+
+        if ( this.options.getValue().ns_pos_vat === 'disabled' ) {
+            price = nsRawCurrency( item.sale_price );
+        } else {
+            if ( this.options.getValue().ns_pos_prefered_price === 'gross_prices' ) {
+                price = nsRawCurrency( item.sale_price_gross );
+            } else {
+                price = nsRawCurrency( item.sale_price_net );
+            }
+        }
+
+        return nsHooks.applyFilters( 'ns-pos-product-sale-price', price, item );
+    }
+
+    public getCustomPrice(item) {
+        let customPrice = 0;
+        if ( this.options.getValue().ns_pos_prefered_price === 'gross_prices' ) {
+            customPrice = nsRawCurrency( item.custom_price_gross );
+        } else {
+            customPrice = nsRawCurrency( item.custom_price_net );
+        }
+
+        return nsHooks.applyFilters( 'ns-pos-product-custom-price', customPrice, item );
+    }
+
+    public getWholesalePrice(item) {
+        let wholeSalePrice = 0;
+        if ( this.options.getValue().ns_pos_prefered_price === 'gross_prices' ) {
+            wholeSalePrice = nsRawCurrency( item.wholesale_price_gross );
+        } else {
+            wholeSalePrice = nsRawCurrency( item.wholesale_price_net );
+        }
+
+        return nsHooks.applyFilters( 'ns-pos-product-wholesale-price', wholeSalePrice, item );
+    }
+
+    public setHoldPopupEnabled(status = true) {
+        this._holdPopupEnabled = status;
+    }
+
+    public getHoldPopupEnabled() {
+        return this._holdPopupEnabled;
+    }
+
+    /**
+     * This is the first initial queue
+     * that runs when the POS is loaded. 
+     * It also run when the pos is reset.
+     */
+    async processInitialQueue() {
+        return new Promise( async ( resolve, reject ) => {
+            for (let index in this._initialQueue) {
+                try {
+                    const response = await Promise.race([
+                        this._initialQueue[index](),
+                        new Promise((_, timeoutReject) => setTimeout(() => timeoutReject(new Error('Timeout')), 60000)) // 5 seconds timeout
+                    ]);
+                } catch (exception) {
+                    reject( exception );
+                    nsSnackBar.error(exception.message);
+                }
+            }
+
+            resolve( true );
+        });
+    }
+
+    /**
+     * This methods run as part of the verification
+     * of the cart refreshing. Cannot refresh the cart.
+     * @param coupon coupon
+     */
+    removeCoupon(coupon) {
+        const order = this.order.getValue();
+        const coupons = order.coupons;
+        const index = coupons.indexOf(coupon);
+        coupons.splice(index, 1);
+        order.coupons = coupons;
+        this.order.next(order);
+    }
+
+    pushCoupon(coupon) {
+        const order = this.order.getValue();
+
+        order.coupons.forEach(_coupon => {
+            if (_coupon.code === coupon.code) {
+                const message = __('This coupon is already added to the cart');
+                nsSnackBar.error(message)
+                throw message;
+            }
+        })
+
+        order.coupons.push(coupon);
+        this.order.next(order);
+        this.refreshCart();
+    }
+
+    get wirelessBarcodeState() {
+        return this._wirelessBarcodeState;
+    }
+
+    get header() {
+        /**
+         * As POS object is defined on the
+         * header, we can use that to reference the buttons (component)
+         * that needs to be rendered dynamically
+         */
+        const data = {
+            buttons: {
+                nsPosDashboardButton,
+                nsPosPendingOrderButton,
+                nsPosOrderTypeButton,
+                nsPosCustomersButton,
+                nsPosResetButton,
+            }
+        };
+
+        /**
+         * if the cash register is enabled
+         * we'll add that button to the list
+         * of button available.
+         */
+        if (this.options.getValue().ns_pos_registers_enabled === 'yes') {
+            data.buttons['nsPosCashRegister'] = nsPosCashRegister;
+        }
+
+        /**
+         * expose the pos header data, for allowing
+         * custom button injection.
+         */
+        nsHooks.doAction('ns-pos-header', data);
+
+        return data;
+    }
+
+    defineOptions(options) {
+        this._options.next(options);
+
+        /**
+         * The printing adapter reads ns_pos_printing_gateway from here to decide between the
+         * browser dialog and a printing plugin.
+         */
+        this.print.setContext({ options });
+    }
+
+    defineCurrentScreen() {
+        /**
+         * The POS runs as a single full-width cart column (the product grid was
+         * removed in favour of barcode scanning), so the section stays on 'both'
+         * for every screen size. Switching to 'grid' would hide the cart totals
+         * and expose the cart/products tabs for a grid that is no longer rendered.
+         */
+        this._visibleSection.next('both');
+        this._screen.next(<string>this._responsive.is());
+    }
+
+    changeVisibleSection(section) {
+        if (['both', 'cart', 'grid'].includes(section)) {
+
+            if (['cart', 'both'].includes(section)) {
+                this.refreshCart();
+            }
+
+            this._visibleSection.next(section);
+        }
+    }
+
+    /**
+     * Refuses a payment identical to the one just added, when it arrives too fast to be deliberate.
+     *
+     * Order 260921-020 was rung up at 89 baht, recorded two cash payments of 100, and handed over 111
+     * baht of change. Both rows carry the same second. Whether the second one came from a keystroke
+     * reaching two handlers or from a cashier entering the amount again because nothing on screen
+     * confirmed the first, the till should not have accepted it silently.
+     *
+     * The window is deliberately short. Counting out two notes of the same denomination is a real thing
+     * a cashier does, and blocking it outright would be removing a working practice to patch a bug. But
+     * doing it inside a second and a half — typing the amount, Enter, typing it again, Enter — is not
+     * something hands do; that is software firing twice.
+     */
+    private _lastPaymentSignature: string = '';
+
+    private _lastPaymentAddedAt: number = 0;
+
+    private static readonly DUPLICATE_PAYMENT_WINDOW_MS = 1500;
+
+    addPayment(payment: Payment) {
+        if (payment.value > 0) {
+            const signature = `${payment.identifier}:${payment.value}`;
+            const now = Date.now();
+
+            if (
+                signature === this._lastPaymentSignature &&
+                ( now - this._lastPaymentAddedAt ) < POS.DUPLICATE_PAYMENT_WINDOW_MS
+            ) {
+                return nsSnackBar.error(
+                    __( 'The same payment was just added. Check the payment list before adding it again.' )
+                );
+            }
+
+            this._lastPaymentSignature = signature;
+            this._lastPaymentAddedAt = now;
+
+            const order = this._order.getValue();
+            order.payments.push(payment);
+            this._order.next(order);
+
+            return this.computePaid();
+        }
+
+        return nsSnackBar.error('Invalid amount.');
+    }
+
+    removePayment(payment: Payment) {
+
+        if (payment.id !== undefined) {
+            return nsSnackBar.error( __( 'Unable to delete a payment attached to the order.' ) );
+        }
+
+        const order = this._order.getValue();
+        const index = order.payments.indexOf(payment);
+        order.payments.splice(index, 1);
+        this._order.next(order);
+
+        nsEvent.emit({
+            identifier: 'ns.pos.remove-payment',
+            value: payment
+        });
+
+        this.updateCustomerAccount(payment);
+        this.computePaid();
+    }
+
+    updateCustomerAccount(payment: Payment) {
+        if (payment.identifier === 'account-payment') {
+            const customer = this.order.getValue().customer;
+            customer.account_amount += payment.value;
+            this.selectCustomer(customer);
+        }
+    }
+
+    getPriceWithoutTax(value, rate, type) {
+        if (type === 'inclusive') {
+            return Tax.computeInclusive( value, rate );
+        } else if (type === 'exclusive') {
+            return value;
+        }
+    }
+
+    getPriceWithTax( value, rate, type ) {
+        if (type === 'inclusive') {
+            return value;
+        } else if (type === 'exclusive') {
+            return Tax.computeExclusive( value, rate )
+        }
+    }
+
+    getVatValue(value, rate, type) {
+        if (type === 'inclusive') {
+            return value - this.getPriceWithoutTax(value, rate, type);
+        } else if (type === 'exclusive') {
+            return this.getPriceWithTax(value, rate, type) - value;
+        }
+
+        return 0;
+    }
+
+    computeTaxes() {
+        return new Promise((resolve, reject) => {
+            let order   =   this.order.getValue();
+
+            /**
+             * @todo Urgent refactoring needed.
+             * We can't determine if that block is necessary.
+             */
+            if (order.tax_group_id === undefined || order.tax_group_id === null) {
+                this.computeOrderTaxes( order );
+
+                return resolve({ 
+                    data: { order },
+                    status: 'success'
+                });
+            }
+
+            const group = order.tax_group;
+
+            /**
+             * if the tax group is already cached
+             * we'll pull that rather than doing a new request.
+             */
+            if ( group.id !== undefined ) {
+
+                /**
+                 * Only if a tax group is assigned to the 
+                 * order we should then get the real VAT value.
+                 */
+                if ( group.id === order.tax_group_id ) {
+                    order   =   <Order>this.computeOrderTaxGroup( order, group );
+                }
+
+                return resolve({
+                    status: 'success',
+                    data: { tax: group, order }
+                });
+            }
+            
+            if ( ! [ undefined, null ].includes( order.tax_group_id ) && order.tax_group_id.toString().length > 0 ) {
+                nsHttpClient.get(`/api/taxes/groups/${order.tax_group_id}`)
+                    .subscribe({
+                        next: (tax: any) => {
+                            order   =   <Order>this.computeOrderTaxGroup( order, tax );
+    
+                            return resolve({
+                                status: 'success',
+                                data: { tax, order }
+                            })
+                        }, 
+                        error: (error) => {
+                            return reject(error);
+                        }
+                    })
+            } else {
+                return reject({
+                    status: 'error',
+                    message: __('No tax group assigned to the order')
+                })
+            }
+        })
+    }
+
+    computeOrderTaxGroup( order, taxGroup ) {
+        const summarizedRates   =   <number>taxGroup.taxes.map( tax => parseFloat( tax.rate ) ).reduce( ( b, a ) => b + a );
+        const currentVatValue   =   this.getVatValue( Math.max(0, order.subtotal - order.discount - (order.total_coupons || 0)), summarizedRates, order.tax_type );
+
+        taxGroup.taxes   =   taxGroup.taxes.map( _tax => {
+            const currentPercentage     =   math.chain( 
+                math.chain( _tax.rate ).divide( summarizedRates ).done()
+            ).multiply( 100 ).done();
+
+            return {
+                id: _tax.id,
+                tax_id : _tax.tax_id,
+                name: _tax.name,
+                rate: parseFloat(_tax.rate),
+                tax_value: math.chain(
+                    math.chain( currentVatValue ).multiply( currentPercentage ).done()
+                ).divide(100).done()
+            };
+        });
+
+        if ( taxGroup.taxes.length === 0 ) {
+            nsSnackBar.error( __( 'The selected tax group doesn\'t have any assigned sub taxes. This might cause wrong figures.' ), __( 'Proceed' ), { duration: false });
+
+            return;
+        }
+
+        order.tax_group = order.tax_group || {};
+        order.taxes = taxGroup.taxes;
+
+        /**
+         * this is set to cache the 
+         * tax group to avoid subsequent request
+         * to the server.
+         */
+        order.tax_group = taxGroup;
+
+        return this.computeOrderTaxes( order );
+    }
+
+    computeOrderTaxes( order: Order ) {
+        const options   =   this.options.getValue();
+        const posVat        =   options.ns_pos_vat;
+        const priceWithTax    =   options.ns_pos_prefered_price === 'gross_prices';
+
+        if ([ 'flat_vat', 'variable_vat' ].includes(posVat) && order.taxes && order.taxes.length > 0) {
+            order.tax_value += order.taxes
+                .map(tax => tax.tax_value)
+                .reduce((before, after) => before + after);
+        }
+
+        return order;
+    }
+
+    sumProductsTaxes( order: Order ) {
+        const products  =   this.products.getValue();
+        const options   =   this.options.getValue();
+        const posVat    =   options.ns_pos_vat;
+        
+        order.products = products;
+        order.total_products = products.length;
+
+        /**
+         * Always reset to prevent stale values from a previous
+         * VAT mode leaking into a different configuration.
+         */
+        order.products_tax_value = 0;
+
+        /**
+         * Product-level taxes are only relevant in products_vat mode.
+         * For flat_vat / variable_vat, taxes are computed via computeOrderTaxes
+         * and added directly to order.tax_value, then onto the total in refreshCart.
+         * For disabled, no tax logic should apply at all.
+         */
+        if ( posVat === 'products_vat' ) {
+            const totalTaxValue =  products.map((product: OrderProduct) => {
+                return product.total_tax_value;
+            });
+
+            if ( totalTaxValue.length > 0 ) {
+                order.products_tax_value = totalTaxValue.reduce((before, after) => before + after);
+            }
+
+            /**
+             * When pricing is exclusive (price does not include tax), the
+             * product tax values must be surfaced in the subtotal so they are
+             * reflected in discounts, coupons and the final total.
+             * When pricing is inclusive the tax is already embedded in the price.
+             */
+            if ( options.ns_pos_prefered_price === 'net_prices' ) {
+                order.subtotal  =   math.chain( order.subtotal ).add( order.products_tax_value ).done();
+            }
+        }
+
+        return order;
+    }
+
+    /**
+     * This will check if the order can be saved as layway.
+     * might request additionnal information through a popup.
+     * @param order Order
+     */
+    canProceedAsLaidAway(_order: Order): { status: string, message: string, data: { order: Order } } | any {
+        return new Promise(async (resolve, reject) => {
+            const minimalPaymentPercent = _order.customer.group.minimal_credit_payment;
+            const firstPart     =   math.chain( _order.total ).multiply( minimalPaymentPercent ).done();
+            let expected: any = math.chain( firstPart ).divide( 100 ).done();
+            expected = parseFloat(expected);
+
+            /**
+             * checking order details
+             * installments & payment date
+             */
+            try {
+                const result = await new Promise<{order: Order}>((resolve, reject) => {
+                    Popup.show(nsLayawayPopup, { order: _order, reject, resolve });
+                });
+
+                if (result.order.instalments.length === 0 && result.order.tendered < expected) {
+                    const message = __(`Before saving this order, a minimum payment of {amount} is required`).replace('{amount}', nsCurrency(expected));
+                    Popup.show( nsAlertPopup, { title: __('Unable to proceed'), message });
+                    return reject({ status: 'error', message });
+                } else {
+                    const paymentType = this.selectedPaymentType.getValue();
+                    const expectedSlice = result.order.instalments.filter(payment => payment.amount >= expected && moment( payment.date ).isSame( ns.date.moment.startOf( 'day' ), 'day' ) );
+
+                    if ( expectedSlice.length === 0 ) {
+                        return resolve({ status: 'success', message: __('Layaway defined'), data: { order: result.order } });
+                    }
+
+                    const firstSlice = expectedSlice[0].amount;
+
+                    if ( firstSlice > 0 ) {
+                        /**
+                         * If the instalment has been configured, we'll ease things for
+                         * the waiter and invite him to add the first slice as 
+                         * the payment.
+                         */
+                        Popup.show( nsConfirmPopup, {
+                            title: __(`Initial Payment`),
+                            message: __(`In order to proceed, an initial payment of {amount} is required for the selected payment type "{paymentType}". Would you like to proceed ?`)
+                                .replace('{amount}', nsCurrency(firstSlice))
+                                .replace('{paymentType}', paymentType.label),
+                            onAction: (action) => {
+                                if ( action ) {
+                                    const payment: Payment = {
+                                        identifier: paymentType.identifier,
+                                        label: paymentType.label,
+                                        value: firstSlice,
+                                        readonly: false,
+                                        selected: true,
+                                    }
+        
+                                    this.addPayment(payment);   
+                                    
+                                    /**
+                                     * The expected slice
+                                     * should be marked as paid once submitted
+                                     */
+                                    expectedSlice[0].paid   =   true;
+        
+                                    resolve({ status: 'success', message: __('Layaway defined'), data: { order: result.order } });
+                                } else {
+                                    reject({ status: 'error', message: __( 'The request was canceled' ) })
+                                }
+                            }
+                        });
+                    } else {
+                        /**
+                         * no payment required, let's proceed.
+                         */
+                        resolve({ status: 'success', message: __('Layaway defined'), data: { order: result.order } });
+                    }
+                }
+
+            } catch (exception) {
+                return reject(exception);
+            }
+        });
+    }
+
+    /**
+     * Fields might be provided to overwrite the default information 
+     * set on the order. 
+     * @param orderFields Object
+     */
+    submitOrder(orderFields = {}) {
+        return new Promise(async (resolve, reject) => {
+            var order = {
+                ...<Order>this.order!.getValue(),
+                ...orderFields
+            };
+
+            const minimalPayment = order.customer.group.minimal_credit_payment;
+
+            /**
+             * this verification applies only if the 
+             * order is not "hold".
+             */
+            if (order.payment_status !== 'hold') {
+                if (order.payments.length === 0 && order.total > 0 && order.total > order.tendered) {
+                    if (this.options.getValue().ns_orders_allow_partial === 'no') {
+                        const message = __('Partially paid orders are disabled.');
+                        return reject({ status: 'error', message });
+                    } else if (minimalPayment >= 0) {
+                        try {
+                            const result = await this.canProceedAsLaidAway(order);
+
+                            /**
+                             * the order might have been updated
+                             * by the layaway popup.
+                             */
+                            order = result.data.order;
+                        } catch (exception) {
+                            return reject(exception);
+                        }
+                    }
+                }
+            }
+
+            if (!this._isSubmitting) {
+                this._isSubmitting = true;
+                return this.proceedSubmitting( order, resolve, reject );
+            }
+
+            return reject({ status: 'error', message: __('An order is currently being processed.') });
+        });
+    }
+
+    /**
+     * Will proceed to submit the order directly
+     * @param order Order
+     * @param resolve resolve callback
+     * @param reject reject callback
+     * @returns Subscription
+     */
+    proceedSubmitting( order, resolve, reject ) {
+        /**
+         * @todo do we need to set a new value here
+         * probably the passed value should be send to the server.
+         */
+        const method = order.id !== undefined ? 'put' : 'post';
+
+        /**
+         * We should allow any module to mutate
+         * the order before it's submitted.
+         */
+        nsHooks.doAction('ns-order-before-submit', order );
+
+        return nsHttpClient[method](`/api/orders${order.id !== undefined ? '/' + order.id : ''}`, order)
+            .subscribe({
+                next: result => {
+                    resolve(result);
+                    this.reset();
+
+                    /**
+                     * will trigger an acction when
+                     * the order has been successfully submitted
+                     */
+                    nsHooks.doAction('ns-order-submit-successful', result);
+
+                    this._isSubmitting = false;
+
+                    /**
+                     * when all this has been executed, we can play
+                     * a sound if it's enabled
+                     */
+                    const url     =   this.options.getValue().ns_pos_complete_sale_audio;
+                    
+                    if ( url.length > 0 ) {
+                        ( new Audio( url ) ).play();
+                    }
+                },
+                error: (error: any) => {
+                    this._isSubmitting = false;
+                    reject(error);
+
+                    nsHooks.doAction('ns-order-submit-failed', error);
+                }
+            });
+    }
+
+    defineQuantities( product, units = [] ) {
+        return new Promise ( ( resolve, reject ) => { 
+            const unit  =   units.filter( unit => unit.id === product.unit_id );
+
+            const quantities    =   {
+                unit: unit[0] || {},
+                
+                sale_price_gross: product.mode === 'normal' ? parseFloat( product.price_gross ) : 0,
+                sale_price_net: product.mode === 'normal' ? parseFloat( product.price_net ) : 0,
+                sale_price: product.mode === 'normal' ? parseFloat( product.unit_price ) : 0,
+                sale_price_tax: product.mode === 'normal' ? product.tax_value : 0,
+                sale_price_edit: 0,
+
+                wholesale_price_gross: product.mode === 'wholesale' ? parseFloat( product.price_gross ) : 0,
+                wholesale_price_net: product.mode === 'wholesale' ? parseFloat( product.price_net ) : 0,
+                wholesale_price: product.mode === 'wholesale' ? parseFloat( product.unit_price ) : 0,
+                wholesale_price_tax: product.mode === 'wholesale' ? product.tax_value : 0,
+                wholesale_price_edit: 0,
+
+                custom_price_gross: product.mode === 'custom' ? parseFloat( product.price_gross ) : 0,
+                custom_price_net: product.mode === 'custom' ? parseFloat( product.price_net ) : 0,
+                custom_price: product.mode === 'custom' ? parseFloat( product.unit_price ) : 0,
+                custom_price_tax: product.mode === 'custom' ? product.tax_value : 0,
+                custom_price_edit: product.mode === 'custom' ? parseFloat( product.unit_price ) : 0,
+            };
+
+            let tax_group;
+
+            /**
+             * this will get the taxes
+             * and compute it for the product
+             */
+            if( [ 'inclusive', 'exclusive' ].includes( product.tax_type ) ) {
+                try {
+                    if( product.tax_group_id ) {
+                        nsHttpClient.get( `/api/taxes/groups/${product.tax_group_id}` )
+                            .subscribe({
+                                next: (taxGroup: any) => {
+                                    [ 'sale', 'wholesale', 'custom' ].forEach( label => {
+                                        quantities[ label + '_price_tax' ]  =   taxGroup.taxes.map( tax => {
+                                            return this.getVatValue( quantities[ label + '_price' ], tax.rate, product.tax_type );
+                                        }).reduce( ( b, a ) => b + a );
+
+                                        quantities[ 'gross_' + label + '_price' ]  =  quantities[ label + '_price' ] + quantities[ label + '_price_tax' ];
+                                        quantities[ 'net_' + label + '_price' ]  =  quantities[ label + '_price' ] - quantities[ label + '_price_tax' ];
+                                    });
+                                    
+                                    tax_group            =   taxGroup;
+        
+                                    return resolve( quantities );
+                                },
+                                error:  error => {
+                                    reject( false );
+                                }
+                            })
+                    } else {
+                        quantities.sale_price_tax       =   0;
+                        quantities.wholesale_price_tax  =   0;
+                        quantities.sale_price_net  =  product.unit_price;
+                        
+                        return resolve( quantities );
+                    }
+                } catch( exception ) {
+                    return nsSnackBar.error( __( 'An error has occurred while computing the product.' ) );
+                }
+            }
+            
+            return resolve( quantities );
+        });
+    }
+
+    loadOrder(order_id) {
+        return new Promise((resolve, reject) => {
+            nsHttpClient.get(`/api/orders/${order_id}/pos`)
+                .subscribe({
+                    next: async (order: any) => {
+                        /**
+                         * an error might occurs while
+                         * dealing with custom action. We should 
+                         * catch that and reject the exception.
+                         */
+                        try {
+                            nsHooks.doAction( 'ns-before-load-order', { order });
+                        } catch( exception ) {
+                            return reject( exception );
+                        }
+
+                        const options   =   this.options.getValue();
+
+                        order = { ...this.defaultOrder(), ...order };
+    
+                        /**
+                         * We'll rebuilt the product
+                         */
+                        const products  =   [];
+                        
+                        for( let i = 0; i < order.products.length ; i++ ) {
+                            
+                            const orderProduct      =   order.products[i];
+
+                            /**
+                             * in case the orderProduct is a quick product
+                             * we need to fill back the $quantities function
+                             */
+                            if ( orderProduct.product === null ) {
+                                orderProduct.product    =   {
+                                    mode: 'custom',
+                                    name: orderProduct.name,
+                                    unit_id: orderProduct.unit_id,
+                                    unit_quantities :   [
+                                        await this.defineQuantities( orderProduct )
+                                    ]
+                                }
+                            }
+
+                            orderProduct.$original = () => orderProduct.product;
+                            orderProduct.$quantities = () => {
+                                let unitQuantity     =   orderProduct
+                                    .product
+                                    .unit_quantities
+                                    .filter(unitQuantity => +unitQuantity.id === +orderProduct.unit_quantity_id || unitQuantity.id === undefined )[0];
+
+                                if ( orderProduct.mode === 'custom' ) {
+                                    unitQuantity.custom_price_edit = orderProduct.unit_price; 
+                                    unitQuantity.custom_price_gross = orderProduct.price_gross;
+                                    unitQuantity.custom_price_net = orderProduct.price_net;
+                                    unitQuantity.custom_price_tax = orderProduct.tax_value;
+                                }
+
+                                return unitQuantity;
+                            }
+
+                            products.push( orderProduct );
+                        }
+    
+                        /**
+                         * we'll redefine the order type
+                         */
+                        order.type = Object.values(this.types.getValue()).filter((type: any) => type.identifier === order.type)[0];
+    
+                        /**
+                         * the address is provided differently
+                         * then we need to rebuild it the way it's saved and used
+                         */
+                        order.addresses = {
+                            shipping: order.shipping_address,
+                            billing: order.billing_address
+                        }
+    
+                        delete order.shipping_address;
+                        delete order.billing_address;
+        
+                        /**
+                         * let's all set, let's load the order
+                         * from now. No further change is required
+                         */
+    
+                        this.buildOrder(order);
+                        this.buildProducts(products);
+
+                        await this.selectCustomer(order.customer);
+
+                        resolve(order);
+                    }, 
+                    error: error => reject(error)
+                });
+        })
+    }
+
+    buildOrder(order) {
+        this.order.next(order);
+    }
+
+    buildProducts(products) {
+        this.recomputeProducts(products);
+        this.products.next(products);
+        nsHooks.doAction( 'ns-after-cart-changed' );
+    }
+
+    printOrderReceipt( order, mode ) {
+        const options = this.options.getValue();
+
+        if (options.ns_pos_printing_enabled_for === 'disabled') {
+            return false;
+        }
+
+        /**
+         * There should be a better
+         * way of writing this.
+         */
+        if ( 
+            ( options.ns_pos_printing_enabled_for === 'all_orders'  ) ||
+            ( options.ns_pos_printing_enabled_for === 'partially_paid_orders' && [ 'paid', 'partially_paid' ].includes( order.payment_status ) ) ||
+            ( options.ns_pos_printing_enabled_for === 'only_paid_orders' && [ 'paid' ].includes( order.payment_status ) )
+        ) {
+            /**
+             * Announced when it fails. A receipt that silently never prints is discovered by the
+             * customer waiting at the counter, not by the cashier.
+             */
+            if ( this.print.process( order.id, 'sale', mode ) === false ) {
+                nsSnackBar.error( __( 'พิมพ์ใบเสร็จไม่สำเร็จ กดปริ้นซ้ำได้ที่ปุ่มลัด F8' ) );
+
+                return false;
+            }
+
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+
+    computePaid() {
+        const order = this._order.getValue();
+        order.tendered = 0;
+
+        if (order.payments.length > 0) {
+            order.tendered = order.payments.map(p => p.value).reduce((b, a) => a + b);
+        }
+
+        if (order.tendered >= order.total) {
+            order.payment_status = 'paid';
+        } else if (order.tendered > 0 && order.tendered < order.total) {
+            order.payment_status = 'partially_paid';
+        }
+
+        order.change = order.tendered - order.total;
+
+        this._order.next(order);
+    }
+
+    setPaymentActive( payment: PaymentType ) {
+        const payments = this._paymentsType.getValue();
+        payments.forEach(p => {
+            if ( p.identifier === payment.identifier ) {
+                p.selected = true;
+            } else {
+                p.selected = false;
+            }
+        });
+        this._paymentsType.next(payments);
+    }
+
+    definedPaymentsType(payments) {
+        this._paymentsType.next(payments);
+    }
+
+    selectCustomer(customer) {
+        return new Promise((resolve, reject) => {
+            const order = this.order.getValue();
+            const billing = Object.assign( customer.billing || {},  {});
+
+            if ( billing.id !== undefined ) {
+                delete billing.id;
+            }
+
+            order.customer = customer;
+            order.customer_id = customer.id;
+            order.addresses.billing = billing;
+            
+            this.order.next(order);
+
+            /**
+             * asynchronously we can load
+             * customer meta data
+             */
+            if (customer.group === undefined || customer.group === null) {
+                nsHttpClient.get(`/api/customers/${customer.id}/group`)
+                    .subscribe({
+                        next: group => {
+                            order.customer.group = group;
+                            this.order.next(order);
+                            resolve(order);
+                        },
+                        error: ( error ) => {
+                            reject(error);
+                        }
+                    });
+            } else {
+                return resolve(order);
+            }
+        });
+    }
+
+    updateCart(current, update) {
+        for (let key in update) {
+            if (update[key] !== undefined) {
+                current[ key ]  =   update[ key ];
+            }
+        }
+
+        this.order.next(current);
+
+        /**
+         * explicitly here we do manually refresh the cart
+         * as if we listen to cart update by subscribing,
+         * that will create a loop (huge performance issue).
+         */
+        this.refreshCart();
+    }
+
+    /**
+     * everytime the cart
+     * refreshed, we might need
+     * to perform some verification
+     */
+    checkCart() {
+        const order = this.order.getValue();
+        const unmatchedConditions = [];
+
+        order.coupons.forEach(coupon => {
+            /**
+             * by default we'll bypass
+             * the product if it's not available
+             */
+            let isProductValid = true;
+
+            /**
+             * if the coupon includes products
+             * we make sure the products are included on the cart
+             */
+            if (coupon.products.length > 0) {
+                isProductValid = order.products.filter(product => {
+                    return coupon.products.map(p => p.product_id).includes(product.product_id);
+                }).length > 0;
+
+                if (!isProductValid && unmatchedConditions.indexOf(coupon) === -1) {
+                    unmatchedConditions.push(coupon);
+                }
+            }
+
+            /**
+             * by default we'll bypass
+             * the product if it's not available
+             */
+            let isCategoryValid = true;
+
+            /**
+             * if the coupon includes products
+             * we make sure the products are included on the cart
+             */
+            if (coupon.categories.length > 0) {
+                isCategoryValid = order.products.filter(product => {
+                    return coupon.categories.map(p => p.category_id).includes(product.$original().category_id);
+                }).length > 0;
+
+                if (!isCategoryValid && unmatchedConditions.indexOf(coupon) === -1) {
+                    unmatchedConditions.push(coupon);
+                }
+            }
+        });
+
+        unmatchedConditions.forEach(coupon => {
+            nsSnackBar.error(
+                __('The coupons "%s" has been removed from the cart, as it\'s required conditions are no more meet.')
+                    .replace('%s', coupon.name),
+                __('Okay'), {
+                duration: 6000
+            });
+
+            this.removeCoupon(coupon);
+        });
+    }
+
+    sumProductsTotals( order ) {
+        const products  = this.products.getValue();        
+
+        const total = products
+            .filter( product => product.product_type !== 'dynamic' )
+            .map(product => product.total_price );
+
+        if (total.length > 0) {
+            let productTotalValue       =   total.reduce((b, a) => b + a);
+            let dynamicProductValue     =   0;
+            let dynamicProducts     =   products
+                .filter( product => product.product_type === 'dynamic' )
+                .map( product => {
+                    product.unit_price      =   ( productTotalValue * product.rate ) / 100;
+                    product.total_price     =   product.unit_price * product.quantity;
+
+                    return product.total_price;
+                });
+
+            if ( dynamicProducts.length > 0 ) {
+                dynamicProductValue     =   dynamicProducts.reduce( (b,a) => b + a );
+            }
+            order.subtotal = productTotalValue + dynamicProductValue;
+        } else {
+            order.subtotal = 0;
+        }
+
+        order       =   this.sumProductsTaxes( order );
+
+        return order;
+    }
+
+    async refreshCart() {
+        /**
+         * check if according to the product
+         * available on the cart the coupons must 
+         * remains the same.
+         */
+        this.checkCart();
+
+        let order   =   this.sumProductsTotals( this.order.getValue() );
+        
+        /**
+         * we'll compute here the value
+         * of the coupons
+         */
+        const totalValue = order.coupons.map(customerCoupon => {
+            customerCoupon.value = couponValue(customerCoupon, order.products, order.subtotal);
+            return customerCoupon.value;
+        });
+
+        order.total_coupons = 0;
+
+        if (totalValue.length > 0) {
+            order.total_coupons = totalValue.reduce((before, after) => before + after);
+        }
+
+        if (order.discount_type === 'percentage') {
+            order.discount = (order.discount_percentage * order.subtotal) / 100;
+        }
+
+        /**
+         * if the discount amount is greather
+         * than the subtotal, the discount amount
+         * will be set to the order.subtotal
+         */
+        if (order.discount > order.subtotal && order.total_coupons === 0) {
+            order.discount = order.subtotal;
+            nsSnackBar.info( __( 'The discount has been set to the cart subtotal.' ));
+        }
+
+        /**
+         * save actual change to ensure
+         * all listener are up to date.
+         */
+        order.tax_value             =   0;
+        
+        this.order.next(order);
+
+        /**
+         * will compute the taxes based on 
+         * the actual state of the order
+         */
+        try {
+            const response = await this.computeTaxes();
+            order = response['data'].order;
+        } catch (exception) {
+            if (exception !== false && exception.message !== undefined) {
+                nsSnackBar.error(exception.message || __('An unexpected error has occurred while fetching taxes.'), __('OKAY'), { duration: 0 });
+            }
+        }
+
+        const taxType   =   order.tax_type;
+        let tax_value   =   order.tax_value;
+
+        if ( taxType === 'exclusive' ) {
+            const op1 = math.chain( order.subtotal ).add( order.shipping || 0 ).add( tax_value ).done();
+            order.total     =   math.chain( op1 ).subtract( order.discount ).subtract( order.total_coupons ).done();
+        } else {
+            const op1 = math.chain( order.subtotal ).add( order.shipping || 0 ).done();
+            order.total     =   math.chain( op1 ).subtract( order.discount ).subtract( order.total_coupons ).done();
+        }
+
+        this.order.next(order);
+
+        nsHooks.doAction('ns-cart-after-refreshed', order);
+    }
+
+    /**
+     * Get actual stock used by the product
+     * using the defined unit
+     * @param product_id 
+     * @param unit_id 
+     */
+    getStockUsage(product_id: number, unit_quantity_id: number) {
+        const stocks = this._products.getValue().filter((product: OrderProduct) => {
+            return product.product_id === product_id && product.unit_quantity_id === unit_quantity_id;
+        }).map(product => product.quantity);
+
+        if (stocks.length > 0) {
+            return stocks.reduce((b, a) => b + a);
+        }
+
+        return 0;
+    }
+
+    /**
+     * this is resolved when a product is being added to the
+     * cart. That will help to mutate the product before 
+     * it's added the cart.
+     */
+    addToCartQueue = [
+        ProductUnitPromise,
+        ProductQuantityPromise
+    ];
+
+    /**
+     * Process the item to add it to the cart
+     * @param product 
+     */
+    async addToCart(product) {
+
+        /**
+         * This is where all the mutation made by the  
+         * queue promises are stored.
+         */
+        let productData = new Object;
+
+        /**
+         * Let's combien the built product
+         * with the data resolved by the promises
+         */
+        let cartProduct: OrderProduct = {
+            product_id: product.id || 0,
+            name: product.name,
+            discount_type: 'percentage',
+            discount: 0,
+            discount_percentage: 0,
+            product_type: product.product_type || 'product',
+            rate: product.rate || 0,
+            quantity: product.quantity || 1,
+            tax_group_id: product.tax_group_id,
+            tax_type: product.tax_type || undefined,
+            tax_value: 0, // is computed automatically using $original()
+            unit_id: product.unit_id || 0,
+            unit_price: product.unit_price || 0,
+            price_gross: product.price_gross || 0,
+            price_net: product.price_net || 0,
+            unit_name: <string>(product.unit_name || ''),
+            total_price: 0,
+            total_price_net: 0,
+            total_price_gross: 0,
+            mode: product.mode || 'normal',
+            $original: product.$original || (() => product),
+            $quantities: product.$quantities || undefined
+        };
+
+        /**
+         * will determin if the 
+         * script is processing the add queue
+         */
+        this._processingAddQueue = true;
+
+        if (cartProduct.product_id !== 0) {
+            for (let index in this.addToCartQueue) {
+
+                /**
+                 * the popup promise receives the product that
+                 * is above to be added. Hopefully as it's passed by reference
+                 * updating the product should mutate that once the queue is handled.
+                 */
+                try {
+                    const promiseInstance = new this.addToCartQueue[index](cartProduct);
+                    const result = <Object>(await promiseInstance.run(productData));
+
+                    /**
+                     * We just mix both to make sure
+                     * the mutated value overwrite previously defined values.
+                     */
+                    productData = { ...productData, ...result };
+
+                } catch (brokenPromise) {
+                    /**
+                     * if a popup resolve "false",
+                     * that means for some reason the Promise has
+                     * been broken, therefore we need to stop the queue.
+                     */
+                    if (brokenPromise === false) {
+                        this._processingAddQueue = false;
+                        return false;
+                    }
+                }
+            }
+        }
+
+        /**
+         * end proceesing add queue
+         */
+        this._processingAddQueue = false;
+
+        /**
+         * Let's combien the built product
+         * with the data resolved by the promises
+         */
+        cartProduct = { ...cartProduct, ...productData };
+
+        /**
+         * retrieve product that 
+         * are currently stored
+         */
+        const products = this._products.getValue();
+
+        /**
+         * we'll check here if the merge feature is enabled
+         * If it's the case, we'll have to compare the added product
+         * with what already exists and decide to increase the quantity or not.
+         */
+        if ( this.settings.getValue().ns_pos_items_merge ) {
+            const existing      =   products.filter( product => {
+                /**
+                 * we might check other arguments
+                 * in case the products doesn't have the same meta.
+                 */
+                return (
+                    product.product_id === cartProduct.product_id &&
+                    product.tax_group_id === cartProduct.tax_group_id &&
+                    product.unit_id === cartProduct.unit_id &&
+                    product.unit_quantity_id === cartProduct.unit_quantity_id
+                );
+            });
+
+            if ( existing.length > 0 ) {
+                existing[0].quantity       +=  cartProduct.quantity;
+            } else {
+                /**
+                 * push the new product
+                 * at the front of the cart
+                 */
+                products.unshift(cartProduct);
+            }
+
+        } else {
+            /**
+             * push the new product
+             * at the front of the cart
+             */
+            products.unshift(cartProduct);
+        }
+
+        /**
+         * Once the product has been added to the cart
+         * it's being computed
+         */
+        this.recomputeProducts(products);
+
+        /**
+         * dispatch event that the 
+         * product has been added.
+         */
+        this.products.next(products);
+
+        /**
+         * when all this has been executed, we can play
+         * a sound if it's enabled
+         */
+        const url     =   this.options.getValue().ns_pos_new_item_audio;
+
+        if ( url.length > 0 ) {
+            ( new Audio( url ) ).play();
+        }
+
+        nsHooks.doAction( 'ns-after-cart-changed' );
+    }
+
+    defineTypes(types) {
+        this._types.next(types);
+    }
+
+    userCan( permission ) {
+        const permissions   =   this._userPermissions.getValue();
+        const filtered  =   permissions.filter( (p) => p.namespace === permission );
+        return filtered.length > 0;
+    }
+
+    async removeProductUsingIndex(index) {
+        const products = this._products.getValue();
+        const product   =   products[index];
+
+        /**
+         * if the product is persistent,
+         * we should check on the database if the user is allowed
+         * to delete those products.
+         */
+        if ( product.id ) {
+            try {
+                await new Promise((resolve, reject) => {
+                    const popup = Popup.show( nsPosLoadingPopupVue );
+                    nsHttpClient.post(`/api/users/check-permission/`, {
+                        permission: 'nexopos.pos.delete-order-product'
+                    }).subscribe({
+                        next: (response: any) => {
+                            popup.close();
+                            resolve( response );
+                        },
+                        error: error => {
+                            popup.close();
+                            reject( error );
+                        }
+                    })
+                });
+
+                this.resumeRemovingProductUsingIndex( index, products );
+            } catch( exception ) {
+                nsNotice.error( __( 'Forbidden Action' ), __( 'You are not allowed to remove this product.' ) );
+            }
+        } else {
+            this.resumeRemovingProductUsingIndex( index, products );
+        }
+    }
+
+    private resumeRemovingProductUsingIndex( index, products ) {
+        products.splice(index, 1);
+        this.products.next(products);
+        nsHooks.doAction( 'ns-after-cart-changed' );
+    }
+
+    removeProduct(product) {
+        const products = this._products.getValue();
+        const index = products.indexOf(product);
+        products.splice(index, 1);
+        this.products.next(products);
+        nsHooks.doAction( 'ns-after-cart-changed' );
+    }
+
+    updateProduct(product, data, index = null) {
+        const products = this._products.getValue();
+        index = index === null ? products.indexOf(product) : index;
+        index = index === -1 ? 0 : index;
+
+        /**
+         * to ensure Vue updates accordingly.
+         */
+        products[ index ]       =   { ...product, ...data };
+
+        this.recomputeProducts(products);
+        this.products.next(products);
+        nsHooks.doAction( 'ns-after-cart-changed' );
+    }
+
+    recomputeProducts(products = null) {
+        products.forEach( product => {
+            this.computeProduct(product);
+        });
+    }
+
+    getProductUnitPrice( mode, quantities ) {
+        switch( mode ) {
+            case 'custom':
+                return quantities.custom_price_edit;
+            case 'normal':
+                return quantities.sale_price_edit;
+            case 'wholesale':
+                return quantities.wholesale_price_edit;
+        }
+    }
+
+    computeProductTax( product: OrderProduct ) {
+        switch( product.mode ) {
+            case 'custom':
+                return this.computeCustomProductTax( product );
+            case 'normal':
+                return this.computeNormalProductTax( product );
+            case 'wholesale':
+                return this.computeWholesaleProductTax( product );
+            default: 
+                return product;
+        }
+    }
+
+    private proceedProductTaxComputation( product, price ) {
+        const originalProduct   =   product.$original();
+        const taxGroup          =   originalProduct.tax_group;
+
+        let price_net   =   price;
+        let tax_value           =   0;
+        let price_gross      =   price;
+        let total_tax_value     =   0;
+
+        if ( taxGroup !== undefined && taxGroup !== null && taxGroup.taxes !== undefined ) {
+
+            /**
+             * get summarize rates
+             */
+            let summarizedRates     =   0;
+            
+            if ( taxGroup.taxes.length > 0 ) {
+                summarizedRates     =   taxGroup.taxes
+                    .map( r => r.rate )
+                    .reduce( ( b, a ) => b + a );
+            }
+
+            /**
+             * CORRECTED TAX CALCULATION:
+             * Calculate tax on the line total after discount, 
+             * then derive per-unit values for consistency
+             */
+            
+            // Calculate line subtotal (unit price × quantity)
+            const lineSubtotal = math.chain( price ).multiply( product.quantity ).done();
+            
+            // Calculate line total after discount
+            const lineAfterDiscount = math.chain( lineSubtotal ).subtract( product.discount ).done();
+            
+            // Compute tax on the discounted line total
+            let result = this.computeTaxForGroup( 
+                lineAfterDiscount, 
+                taxGroup, 
+                originalProduct.tax_type
+            );
+
+            // Store total tax value
+            total_tax_value = result.tax_value;
+            
+            // Derive per-unit values for consistency with existing system
+            tax_value = math.chain( total_tax_value ).divide( product.quantity ).done();
+            price_gross = math.chain( result.price_gross ).divide( product.quantity ).done();
+            price_net = math.chain( result.price_net ).divide( product.quantity ).done();
+        }
+
+        return { 
+            price_net, 
+            tax_value,  // per-unit tax value
+            price_gross,
+            total_tax_value  // total tax value for the line
+        };
+    }
+
+    computeCustomProductTax( product: OrderProduct ) {
+        const quantities        =   product.$quantities();
+        const result            =   this.proceedProductTaxComputation( product, quantities.custom_price_edit );
+        
+        quantities.custom_price_net =   result.price_net;
+        quantities.custom_price_gross =   result.price_gross;
+        quantities.custom_price_tax =   result.tax_value;
+
+        // Also set the total tax value on the product
+        product.tax_value = result.tax_value;
+        product.total_tax_value = result.total_tax_value;
+
+        product.$quantities     =   () => {
+            return <ProductUnitQuantity>quantities
+        }
+
+        return product;
+    }
+
+    computeNormalProductTax( product: OrderProduct ) {
+        const quantities        =   product.$quantities();
+        const result            =   this.proceedProductTaxComputation( product, quantities.sale_price_edit );
+
+        quantities.sale_price_net   =   result.price_net;
+        quantities.sale_price_gross      =   result.price_gross;
+        quantities.sale_price_tax           =   result.tax_value;
+
+        // Also set the total tax value on the product
+        product.tax_value = result.tax_value;
+        product.total_tax_value = result.total_tax_value;
+
+        product.$quantities     =   () => {
+            return <ProductUnitQuantity>quantities
+        }
+
+        return product;
+    }
+
+    computeWholesaleProductTax( product: OrderProduct ) {
+        const quantities        =   product.$quantities();
+        const result            =   this.proceedProductTaxComputation( product, quantities.wholesale_price_edit );
+
+        quantities.wholesale_price_net  =   result.price_net;
+        quantities.wholesale_price_gross     =   result.price_gross;
+        quantities.wholesale_price_tax          =   result.tax_value;
+
+        // Also set the total tax value on the product
+        product.tax_value = result.tax_value;
+        product.total_tax_value = result.total_tax_value;
+
+        product.$quantities     =   () => {
+            return <ProductUnitQuantity>quantities
+        }
+
+        return product;
+    }
+
+    getPrice( quantities, mode, type ) {
+        switch( mode ) {
+            case 'normal': return quantities[ 'sale_price_' + type ];
+            case 'wholesale': return quantities[ 'wholesale_price_' + type ];
+            case 'custom': return quantities[ 'custom_price_' + type ];
+        } 
+    }
+
+    computeProduct(product: OrderProduct) {
+        
+        /**
+         * determining what is the 
+         * real sale price
+         */
+        if ( product.product_type === 'product' ) {
+            if (product.mode === 'normal') {
+                product.unit_price = this.getSalePrice( product.$quantities() );
+            } else if (product.mode === 'wholesale') {
+                product.unit_price = this.getWholesalePrice( product.$quantities() );
+            } if (product.mode === 'custom') {
+                product.unit_price = this.getCustomPrice( product.$quantities() );
+            }
+        }
+        
+        /**
+         * We'll now compute the discount
+         */
+        this.computeDiscount( product );
+
+        /**
+         * The price with and without tax
+         * needs to be updated as tax is by default computed
+         * after the discount. Therefore we need to make sure.
+         */
+        this.computeProductTaxValue( product );
+
+        let unitPrice = nsHooks.applyFilters( 'ns-pos-product-unit-price', product.unit_price, product );
+        
+        product.total_price =   math.chain( unitPrice ).multiply( product.quantity ).subtract( product.discount ).done();
+        
+        // Ensure total_tax_value is set (fallback for old computation paths)
+        if ( product.total_tax_value === undefined ) {
+            product.total_tax_value = math.chain( product.tax_value ).multiply( product.quantity ).done();
+        }
+
+        // Also set total prices for consistency
+        if ( product.price_gross !== undefined && product.price_net !== undefined ) {
+            product.total_price_gross = math.chain( product.price_gross ).multiply( product.quantity ).done();
+            product.total_price_net = math.chain( product.price_net ).multiply( product.quantity ).done();
+        }
+
+        nsHooks.doAction('ns-after-product-computed', product);
+    }
+
+    computeProductTaxValue( product ) {  
+        const tax_group = product.$original().tax_group;
+        let unitPrice;
+
+        /**
+         * If we're dealing the normal price. We need to make sure the price
+         * from which we'll compute the tax is always the price with tax.
+         */
+        if ( product.mode === 'normal' ) {
+            if ( product.tax_type === 'inclusive' ) {
+                unitPrice = nsHooks.applyFilters( 'ns-pos-product-unit-price', product.$quantities().sale_price_gross, product );
+            } else {
+                unitPrice = nsHooks.applyFilters( 'ns-pos-product-unit-price', product.$quantities().sale_price_net, product );
+            }
+        } else if ( product.mode === 'wholesale' ) {
+            if ( product.tax_type === 'inclusive' ) {
+                unitPrice = nsHooks.applyFilters( 'ns-pos-product-unit-price', product.$quantities().wholesale_price_gross, product );
+            } else {
+                unitPrice = nsHooks.applyFilters( 'ns-pos-product-unit-price', product.$quantities().wholesale_price_net, product );
+            }
+        } else {
+            unitPrice = nsHooks.applyFilters( 'ns-pos-product-unit-price', product.unit_price, product );
+        }
+        
+        /**
+         * CORRECTED TAX CALCULATION:
+         * Tax should be calculated on the line total after discount
+         * This is the standard real-world approach for tax computation
+         */
+        
+        // Calculate line subtotal (unit price × quantity)
+        const lineSubtotal = math.chain( unitPrice ).multiply( product.quantity ).done();
+        
+        // Calculate line total after discount
+        const lineAfterDiscount = math.chain( lineSubtotal ).subtract( product.discount ).done();
+        
+        // Compute tax on the discounted line total
+        let result = this.computeTaxForGroup( 
+            lineAfterDiscount, 
+            tax_group, 
+            product.tax_type
+        );
+
+        // For tax calculated on line total, we need to derive per-unit values
+        product.tax_value = math.chain( result.tax_value ).divide( product.quantity ).done();
+        product.total_tax_value = result.tax_value;
+        product.price_gross = math.chain( result.price_gross ).divide( product.quantity ).done();
+        product.price_net = math.chain( result.price_net ).divide( product.quantity ).done();
+        
+        // Total prices are already correctly calculated since tax was computed on the final amount
+        product.total_price_gross = result.price_gross;
+        product.total_price_net = result.price_net;
+    }
+
+    computeTaxForGroup( price, tax_group, tax_type ) {
+        let tax_value           =   0;     
+        let price_gross      =   0;
+        let price_net   =   0;
+        let taxes               =   [];
+        
+        // A disabled tax type must preserve the price even when a group is selected.
+        if ( ![ 'inclusive', 'exclusive' ].includes( tax_type ) ) {
+            return { ...tax_group, taxes: [], tax_value: 0, price_gross: price, price_net: price };
+        }
+
+        // Handle edge case where price is zero or negative after discount
+        if (price <= 0) {
+            return {
+                ...tax_group,
+                taxes: [],
+                tax_value: 0,
+                price_gross: 0,
+                price_net: 0
+            };
+        }
+        
+        if ( tax_group ) {
+            taxes     =   tax_group.taxes.map( tax => {
+                return {
+                    ...tax,
+                    tax_value: this.getVatValue( price, tax.rate, tax_type )
+                };
+            });
+        }
+
+        if ( taxes.length > 0 ) {
+            const rate          =   taxes.map( tax => tax.rate ).reduce( ( b, a ) => b + a );
+            tax_value           =   this.getVatValue( price, rate, tax_type );            
+            price_net   =   this.getPriceWithoutTax( price, rate, tax_type );
+            price_gross      =   this.getPriceWithTax( price, rate, tax_type );
+        } else {
+            // No taxes defined, price remains unchanged
+            price_gross = price;
+            price_net = price;
+        }
+
+        return {
+            ...tax_group,
+            taxes,
+            tax_value,
+            price_gross,
+            price_net
+        }
+    }
+
+    async runPaymentQueue() {
+        const queues    =   nsHooks.applyFilters( 'ns-pay-queue', [
+            ProductsQueue,
+            CustomerQueue,
+            TypeQueue,
+            PaymentQueue
+        ]);
+
+        for( let index in queues ) {
+            try {
+                const promise   =   new queues[ index ]( this.order.getValue() );
+                const response  =   await promise.run();
+            } catch( exception ) {
+                /**
+                 * in case there is something broken
+                 * on the promise, we just stop the queue.
+                 */
+                console.error( 'A checkout queue step failed, the queue was stopped.', exception );
+                return false;
+            }
+        }
+    }
+
+    computeDiscount( product ) {
+        if (['flat', 'percentage'].includes(product.discount_type)) {
+            if (product.discount_type === 'percentage') {
+                let unitPrice = nsHooks.applyFilters( 'ns-pos-product-unit-price', product.unit_price, product );
+                product.discount        =   math.chain(
+                    math.chain(
+                        math.chain( unitPrice ).multiply( product.discount_percentage ).done()
+                    ).divide( 100 ).done()
+                ).multiply( product.quantity ).done();
+            } 
+        }
+    }
+
+    loadCustomer(id) {
+        return nsHttpClient.get(`/api/customers/${id}`);
+    }
+
+    defineSettings(settings) {
+        this._settings.next(settings);
+
+        /**
+         * Where the POS page keeps its printing URLs. Passed on every call rather than once at
+         * boot, so a later settings update cannot leave the adapter pointing at stale URLs.
+         */
+        this.print.setContext({ urls: settings.urls });
+    }
+
+    voidOrder(order) {
+        if (order.id !== undefined) {
+            if (['hold'].includes(order.payment_status)) {
+                Popup.show(nsConfirmPopup, {
+                    title: __( 'Order Deletion' ),
+                    message: __( 'The current order will be deleted as no payment has been made so far.' ),
+                    onAction: (action) => {
+                        if (action) {
+                            nsHttpClient.delete(`/api/orders/${order.id}`)
+                                .subscribe({
+                                    next: (result: any) => {
+                                        nsSnackBar.success(result.message);
+                                        this.reset();
+                                    },
+                                    error: (error) => {
+                                        return nsSnackBar.error(error.message);
+                                    }
+                                });
+                        }
+                    }
+                });
+            } else {
+                Popup.show( nsPromptPopup, {
+                    title: __( 'Void The Order' ),
+                    message: __( 'The current order will be void. This will cancel the transaction, but the order won\'t be deleted. Further details about the operation will be tracked on the report. Consider providing the reason of this operation.' ),
+                    onAction: (reason) => {
+                        if (reason !== false) {
+                            nsHttpClient.post(`/api/orders/${order.id}/void`, { reason })
+                                .subscribe({
+                                    next: (result: any) => {
+                                        nsSnackBar.success(result.message);
+                                        this.reset();
+                                    },
+                                    error: (error) => {
+                                        return nsSnackBar.error(error.message);
+                                    }
+                                })
+                        }
+                    }
+                });
+            }
+        } else {
+            // Order ยังไม่ได้บันทึก (ไม่มี id) - เคลียร์ออเดอร์ทันที
+            Popup.show(nsConfirmPopup, {
+                title: __( 'Clear Order' ),
+                message: __( 'The current order will be cleared. All products will be removed.' ),
+                onAction: (action) => {
+                    if (action) {
+                        this.reset();
+                        nsSnackBar.success( __( 'The order has been cleared.' ));
+                    }
+                }
+            });
+        }
+    }
+
+    async triggerOrderTypeSelection(selectedType) {
+        const results    =   [];
+
+        for (let i = 0; i < this.orderTypeQueue.length; i++) {
+            results.push( await this.orderTypeQueue[i].promise(selectedType) );
+        }
+
+        /**
+         * Now that all queues has been resolved
+         * we can safely update the order object.
+         */
+        const order = this.order.getValue();
+
+        results.forEach( result => {
+            for( let key in result ) {
+                if ( result[key] !== undefined ) {
+                    order[key] = result[key];
+                }
+            }
+        });
+
+        this.order.next(order);
+    }
+
+    set(key, value) {
+        const settings = this.settings.getValue();
+        settings[key] = value;
+        this.settings.next(settings);
+    }
+
+    unset(key) {
+        const settings = this.settings.getValue();
+        delete settings[key];
+        this.settings.next(settings);
+    }
+
+    get(key) {
+        const settings = this.settings.getValue();
+        return settings[key];
+    }
+
+    destroy() {
+        this._products.unsubscribe();
+        this._customers.unsubscribe();
+        this._types.unsubscribe();
+        this._breadcrumbs.unsubscribe();
+        this._paymentsType.unsubscribe();
+        this._screen.unsubscribe();
+        this._order.unsubscribe();
+        this._settings.unsubscribe();
+    }
+}
+
+(window as any).POS = new POS;
+(window as any).POSClass = POS;
+export const POSInit = <POS>(window as any).POS

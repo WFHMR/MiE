@@ -1,0 +1,72 @@
+<?php
+
+/**
+ * Table Migration
+ **/
+
+use App\Classes\Schema;
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+
+return new class extends Migration
+{
+    /**
+     * Run the migrations.
+     *
+     * @return void
+     */
+    public function up()
+    {
+        if ( ! Schema::hasTable( 'nexopos_products_unit_quantities' ) ) {
+            Schema::createIfMissing( 'nexopos_products_unit_quantities', function ( Blueprint $table ) {
+                $table->bigIncrements( 'id' );
+                $table->integer( 'branch_id' )->nullable(); // stock and price are held per branch — @since v6.3.0
+                $table->integer( 'product_id' );
+                $table->string( 'type' )->default( 'product' ); // product | variation
+                $table->string( 'preview_url' )->nullable();
+                $table->datetime( 'expiration_date' )->nullable();
+                $table->integer( 'unit_id' );
+                $table->string( 'barcode' )->nullable();
+                $table->string( 'scale_plu', 10 )->nullable()->unique();
+                $table->boolean( 'is_weighable' )->default( false );
+                $table->float( 'quantity', 18, 5 );
+                $table->float( 'low_quantity', 18, 5 )->default( 0 );
+                $table->boolean( 'stock_alert_enabled' )->default( false );
+                $table->decimal( 'sale_price', 18, 5 )->default( 0 ); // could be 0 if the product support variations
+                $table->decimal( 'sale_price_edit', 18, 5 )->default( 0 ); // to let the system consider the price sent by the client
+                $table->decimal( 'sale_price_net', 18, 5 )->default( 0 ); // must be computed automatically
+                $table->decimal( 'sale_price_gross', 18, 5 )->default( 0 ); // must be computed automatically
+                $table->decimal( 'sale_price_tax', 18, 5 )->default( 0 );
+                $table->decimal( 'wholesale_price', 18, 5 )->default( 0 );
+                $table->decimal( 'wholesale_price_edit', 18, 5 )->default( 0 );
+                $table->decimal( 'wholesale_price_gross', 18, 5 )->default( 0 ); // include tax whole sale price
+                $table->decimal( 'wholesale_price_net', 18, 5 )->default( 0 ); // exclude tax whole sale price
+                $table->decimal( 'wholesale_price_tax', 18, 5 )->default( 0 );
+                $table->decimal( 'custom_price', 18, 5 )->default( 0 );
+                $table->decimal( 'custom_price_edit', 18, 5 )->default( 0 );
+                $table->decimal( 'custom_price_gross', 18, 5 )->default( 0 );
+                $table->decimal( 'custom_price_net', 18, 5 )->default( 0 );
+                $table->decimal( 'custom_price_tax', 18, 5 )->default( 0 );
+                $table->boolean( 'visible' )->default( true ); // wether the unit should available for sale.
+                $table->integer( 'convert_unit_id' )->nullable();
+                $table->decimal( 'cogs', 18, 5 )->default( 0 );
+                $table->string( 'uuid' )->nullable();
+                $table->timestamps();
+
+                $table->index( [ 'branch_id', 'product_id' ] );
+            } );
+        }
+    }
+
+    /**
+     * Reverse the migrations.
+     *
+     * @return void
+     */
+    public function down()
+    {
+        if ( Schema::hasTable( 'nexopos_products_unit_quantities' ) ) {
+            Schema::dropIfExists( 'nexopos_products_unit_quantities' );
+        }
+    }
+};

@@ -1,0 +1,1 @@
+const s="core",r=function(n,g=s){return nsLanguage.getEntries(g)&&nsLanguage.getEntries(g)[n]||n},a=function(n,g){return nsLanguage.getEntries(g)&&nsLanguage.getEntries(g)[n]||n};export{s as C,r as _,a};

@@ -1,0 +1,11 @@
+<?xml version="1.0" ?>
+<module>
+    <namespace>ProcurementImport</namespace>
+    <version>1.0.0</version>
+    <author>SWP</author>
+    <name>CSV Procurement Import</name>
+    <description>
+        <locale lang="en">Import products, stock, and procurement data from CSV files with complete branch isolation support</locale>
+        <locale lang="th">นำเข้าสินค้า สต็อก และข้อมูลจัดซื้อจากไฟล์ CSV พร้อมระบบแยกสาขาอย่างสมบูรณ์</locale>
+    </description>
+</module>

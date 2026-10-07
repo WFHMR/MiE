@@ -1,0 +1,1692 @@
+<?php
+
+namespace App\Services;
+
+use App\Casts\DateCast;
+use App\Classes\Cache;
+use App\Classes\CrudScope;
+use App\Classes\Output;
+use App\Events\CrudActionEvent;
+use App\Events\CrudAfterPostEvent;
+use App\Events\CrudAfterPutEvent;
+use App\Events\CrudHookEvent;
+use App\Events\CrudReflectionInitialized;
+use App\Exceptions\NotAllowedException;
+use App\Traits\NsForms;
+use Carbon\Carbon;
+use Exception;
+use Illuminate\Contracts\View\View as ContractView;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Query\Builder;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\View;
+use Illuminate\Support\Str;
+use ReflectionClass;
+use TorMorten\Eventy\Facades\Events as Hook;
+
+class CrudService
+{
+    use NsForms;
+
+    /**
+     * Toggle feature array
+     *
+     * @param bool
+     */
+    protected $features = [
+        'bulk-actions' => true, // enable bulk action
+        'single-action' => true, // enable single action
+        'checkboxes' => true, // enable checkboxes
+    ];
+
+    /**
+     * Actions Array
+     */
+    protected $actions = [];
+
+    /**
+     * Protected columns
+     */
+    protected $columns = [];
+
+    /**
+     * Query filters
+     *
+     * @param array
+     */
+    protected $queryFilters = [];
+
+    /**
+     * Link
+     *
+     * @return array
+     */
+    protected $links = [
+        'create' => '',
+        'list' => '',
+        'edit' => '',
+        'put' => '',
+        'post' => '',
+    ];
+
+    /**
+     * Define a where for getEntries
+     *
+     * @var array
+     */
+    protected $listWhere = [];
+
+    /**
+     * Bulk Options
+     *
+     * @param array
+     */
+    protected $bulkActions = [];
+
+    /**
+     * define where in statement
+     */
+    protected $whereIn = [];
+
+    /**
+     * define tabs relations
+     */
+    protected $tabsRelations = [];
+
+    /**
+     * Will ensure every POST request
+     * aren't persistent while events
+     * for this request are triggered.
+     */
+    public $disablePost = false;
+
+    /**
+     * Will ensure every PUT requests aren't persisten
+     * while the events for that request are triggered.
+     */
+    public $disablePut = false;
+
+    /**
+     * define all fiels that shouldn't be used for saving
+     *
+     * @param array
+     */
+    public $skippable = [];
+
+    /**
+     * Define the files that are allowed
+     * do be used while saving or updating an entry.
+     */
+    public $fillable = [];
+
+    /**
+     * Define fields that should be removed from every
+     * entry returned by getEntries. Takes precedence over
+     * (and is merged with) the model's own $hidden array.
+     */
+    protected $hidden = [];
+
+    /**
+     * Determine if the options column should display
+     * before the crud columns
+     */
+    protected $prependOptions = false;
+
+    /**
+     * Determine if actions should be displayed
+     */
+    protected $showOptions = true;
+
+    /**
+     * Determine if checkboxes should be displayed
+     */
+    protected $showCheckboxes = true;
+
+    /**
+     * Will enforce slug to be defined as
+     * a protected property.
+     *
+     * @param string
+     */
+    protected $slug;
+
+    /**
+     * Define the columns that should
+     * be included on the exportation.
+     */
+    protected $exportColumns = [];
+
+    /**
+     * This defines the casts that applies
+     * to every entry on a crud table.
+     */
+    protected $casts = [
+        'created_at' => DateCast::class,
+        'updated_at' => DateCast::class,
+    ];
+
+    protected $model;
+
+    /**
+     * Define permissions for using
+     * the current resource
+     */
+    protected $permissions = [];
+
+    /**
+     * Store the bulk messages for either successful
+     * and unsuccessful operations.
+     */
+    protected $bulkDeleteSuccessMessage;
+
+    protected $bulkDeleteDangerMessage;
+
+    /**
+     * Store the values that should be
+     * picked from relations
+     */
+    protected $pick;
+
+    /**
+     * Store relations that should be joined to every
+     * request made to the database using the model provided
+     */
+    protected $relations = [];
+
+    /**
+     * Keeps the table name for the provided model
+     */
+    protected $table;
+
+    /**
+     * Define the main route identifier.
+     */
+    protected $mainRoute;
+
+    /**
+     * Define the attributes to use while using
+     * the crud component on a search-select field.
+     */
+    protected $optionAttributes = [
+        'label' => 'name',
+        'value' => 'id',
+    ];
+
+    private $reflection;
+
+    /**
+     * Construct Parent
+     */
+    public function __construct()
+    {
+        /**
+         * @todo provide more build in actions
+         */
+        $this->bulkActions = [
+            'delete_selected' => __( 'Delete Selected entries' ),
+        ];
+
+        /**
+         * Bulk action messages
+         */
+        $this->bulkDeleteSuccessMessage = __( '%s entries has been deleted' );
+        $this->bulkDeleteDangerMessage = __( '%s entries has not been deleted' );
+
+        /**
+         * We're introducing attribute support
+         * for scoped queries.
+         */
+        $this->reflection = new ReflectionClass( get_called_class() );
+
+        /**
+         * We're adding a way for module to
+         * support custom class attributes.
+         */
+        CrudReflectionInitialized::dispatch( $this->reflection );
+    }
+
+    /**
+     * Shorthand for preparing and submitting crud request
+     *
+     * @param  array $inputs
+     * @param  mixed $id
+     * @return array as a crud response
+     */
+    public function submitPreparedRequest( $inputs, $id = null ): array
+    {
+        $model = $id !== null ? $this->getModel()::find( $id ) : null;
+        $data = $this->getFlatForm( $inputs, $model );
+
+        return $this->submitRequest( $this->getIdentifier(), $data, $id );
+    }
+
+    /**
+     * Will submit a request to the current
+     * crud instance using the input provided
+     *
+     * @param  array $inputs
+     * @param  int   $id
+     * @return array $response
+     */
+    public function submit( $inputs, $id = null )
+    {
+        return $this->submitRequest(
+            identifier: $this->getIdentifier(),
+            inputs: $inputs,
+            id: $id
+        );
+    }
+
+    /**
+     * Submit a prepared request to a crud instance
+     *
+     * @param  string   $identifier
+     * @param  array    $inputs
+     * @param  int|null $id
+     * @return array    $response
+     */
+    public function submitRequest( $identifier, $inputs, $id = null ): array
+    {
+        $resource = $this->getCrudInstance( $identifier );
+        $model = $resource->getModel();
+        $isEditing = $id !== null;
+        $entry = ! $isEditing ? new $model : $model::find( $id );
+
+        /**
+         * let's keep old form inputs
+         */
+        $unfiltredInputs = $inputs;
+
+        if ( method_exists( $resource, 'filterPostInputs' ) && ! $isEditing ) {
+            $inputs = $resource->filterPostInputs( $inputs, null );
+        }
+
+        if ( method_exists( $resource, 'filterPutInputs' ) && $isEditing ) {
+            $inputs = $resource->filterPutInputs( $inputs, $entry );
+        }
+
+        /**
+         * this trigger a global filter
+         * on the actual crud instance
+         */
+        $inputs = Hook::filter(
+            get_class( $resource ) . ( $isEditing ? '@filterPutInputs' : '@filterPostInputs' ),
+            $inputs,
+            $isEditing ? $entry : null
+        );
+
+        if ( method_exists( $resource, 'beforePost' ) && ! $isEditing ) {
+            $resource->allowedTo( 'create' );
+            $resource->beforePost( $unfiltredInputs, null, $inputs );
+        }
+
+        if ( method_exists( $resource, 'beforePut' ) && $isEditing ) {
+            $resource->allowedTo( 'edit' );
+            $resource->beforePut( $unfiltredInputs, $entry, $inputs );
+        }
+
+        /**
+         * If we would like to handle the PUT request
+         * by any other handler than the CrudService
+         */
+        if (
+            ( ! $isEditing && ! $resource->disablePost ) ||
+            ( $isEditing && ! $resource->disablePut )
+        ) {
+            $fillable = Hook::filter(
+                get_class( $resource ) . '@getFillable',
+                $resource->getFillable()
+            );
+
+            foreach ( $inputs as $name => $value ) {
+                /**
+                 * If the field where explicitly added
+                 * on fields that must be ignored we should skip that.
+                 */
+                if ( ! in_array( $name, $resource->skippable ) ) {
+                    /**
+                     * If submitted field are part of fillable fields
+                     */
+                    if ( in_array( $name, $fillable ) || count( $fillable ) === 0 ) {
+
+                        /**
+                         * We might need to purify value
+                         * before storing it.
+                         */
+                        $entry->$name = $value;
+
+                        /**
+                         * sanitizing input to remove
+                         * all script tags
+                         */
+                        if ( ! empty( $entry->$name ) ) {
+                            $entry->$name = strip_tags( $entry->$name );
+                        }
+                    }
+                }
+            }
+
+            /**
+             * If fillable is empty or if "author_id" is explicitly
+             * mentionned on the fillable array.
+             */
+            if ( empty( $fillable ) || (
+                in_array( 'author_id', $fillable )
+            ) ) {
+                $entry->author_id = Auth::id();
+            }
+
+            /**
+             * if timestamp are provided we'll disable the timestamp feature.
+             * In case a field is not provided, the default value is used.
+             */
+            if ( ! empty( $entry->created_at ) || ! empty( $entry->updated_at ) ) {
+                $entry->timestamps = false;
+                $entry->created_at = $entry->created_at ?: ns()->date->toDateTimeString();
+                $entry->updated_at = $entry->updated_at ?: ns()->date->toDateTimeString();
+            }
+
+            $entry->save();
+
+            /**
+             * loop the tabs relations
+             * and store it
+             */
+            foreach ( $resource->getTabsRelations() as $tab => $relationParams ) {
+                $fields = request()->input( $tab );
+                $class = $relationParams[0];
+                $localKey = $relationParams[1];
+                $foreignKey = $relationParams[2];
+
+                if ( ! empty( $fields ) ) {
+                    $model = $class::where( $localKey, $entry->$foreignKey )->first();
+
+                    /**
+                     * no relation has been found
+                     * so we'll store that.
+                     */
+                    if ( ! $model instanceof $class ) {
+                        $model = new $relationParams[0]; // should be the class;
+                    }
+
+                    /**
+                     * We're saving here all the fields for
+                     * the related model
+                     */
+                    foreach ( $fields as $name => $value ) {
+                        $model->$name = $value;
+                    }
+
+                    $model->$localKey = $entry->$foreignKey;
+                    $model->author_id = Auth::id();
+                    $model->save();
+                }
+            }
+        }
+
+        /**
+         * Create an event after crud POST
+         */
+        if ( ! $isEditing ) {
+            if ( method_exists( $resource, 'afterPost' ) ) {
+                $resource->afterPost( $unfiltredInputs, $entry, $inputs );
+            }
+
+            CrudAfterPostEvent::dispatch( $resource, $unfiltredInputs, $entry );
+        }
+
+        /**
+         * Create an event after crud POST
+         */
+        if ( $isEditing ) {
+            if ( method_exists( $resource, 'afterPut' ) ) {
+                $resource->afterPut( $unfiltredInputs, $entry, $inputs );
+            }
+
+            CrudAfterPutEvent::dispatch( $resource, $unfiltredInputs, $entry );
+        }
+
+        return [
+            'status' => 'success',
+            'data' => [
+                'entry' => $entry,
+                'editUrl' => str_contains( $resource->getLinks()['edit'], '{id}' ) ? Str::replace( '{id}', $entry->id, $resource->getLinks()['edit'] ) : false,
+            ],
+            'message' => $id === null ? __( 'A new entry has been successfully created.' ) : __( 'The entry has been successfully updated.' ),
+        ];
+    }
+
+    /**
+     * This methods returns the Crud table configuration.
+     */
+    public function getCrudConfig(): array
+    {
+        return Hook::filter( get_class( $this ) . '@getCrudConfig', [
+            'columns' => Hook::filter(
+                get_class( $this ) . '@getColumns',
+                $this->getColumns()
+            ),
+            'queryFilters' => Hook::filter( get_class( $this ) . '@getQueryFilters', $this->getQueryFilters() ),
+            'labels' => Hook::filter( get_class( $this ) . '@getLabels', $this->getLabels() ),
+            'links' => Hook::filter( get_class( $this ) . '@getFilteredLinks', $this->getFilteredLinks() ?? [] ),
+            'bulkActions' => Hook::filter( get_class( $this ) . '@getBulkActions', $this->getBulkActions() ),
+            'prependOptions' => Hook::filter( get_class( $this ) . '@getPrependOptions', $this->getPrependOptions() ),
+            'showOptions' => Hook::filter( get_class( $this ) . '@getShowOptions', $this->getShowOptions() ),
+            'showCheckboxes' => Hook::filter( get_class( $this ) . '@getShowCheckboxes', $this->getShowCheckboxes() ),
+            'headerButtons' => Hook::filter( get_class( $this ) . '@getHeaderButtons', $this->getHeaderButtons() ),
+            'identifier' => $this->getIdentifier(),
+            'showSelectedEntries' => true,
+        ], $this );
+    }
+
+    public function getLabels()
+    {
+        return [];
+    }
+
+    /**
+     * Is enabled
+     * Return whether a feature is enabled (true) or not (false)
+     *
+     * @param string feature name
+     * @return boolean/null
+     */
+    public function isEnabled( $feature ): ?bool
+    {
+        return $this->features[$feature] ?? false;
+    }
+
+    public function getIdentifier()
+    {
+        return get_class( $this )::IDENTIFIER;
+    }
+
+    /**
+     * Will return the columns that should
+     * be included on the exportation.
+     */
+    public function getExportColumns()
+    {
+        return $this->exportColumns;
+    }
+
+    /**
+     * Get Bulk Actions
+     *
+     * @return array of bulk actions
+     */
+    public function getBulkActions(): array
+    {
+        return $this->bulkActions;
+    }
+
+    /**
+     * Will return picked array
+     */
+    public function getPicked(): array
+    {
+        return $this->pick ?? [];
+    }
+
+    /**
+     * Will handle the definition operator
+     *
+     * @param Builder $query
+     * @param array   $definition
+     * @param array   $searchKeyValue
+     */
+    public function handleDefinitionOperator( $query, $definition, $searchKeyValue ): void
+    {
+        extract( $searchKeyValue );
+        /**
+         * @param string $key
+         * @param mixed  $value
+         */
+        if ( isset( $definition['operator'] ) ) {
+            $query->where( $key, $definition['operator'], $value );
+        } else {
+            $query->where( $key, $value );
+        }
+    }
+
+    /**
+     * Returns the available query filters
+     */
+    public function getQueryFilters(): array
+    {
+        return $this->queryFilters;
+    }
+
+    public function __extractTable( $relation ): string
+    {
+        $parts = explode( ' as ', $relation[0] );
+        if ( count( $parts ) === 2 ) {
+            return trim( $parts[0] );
+        } else {
+            return $relation[0];
+        }
+    }
+
+    /**
+     * Will return mutated relation
+     * for the Crud instance
+     *
+     * @return array $relations
+     */
+    public function getRelations(): array
+    {
+        return Hook::filter( self::method( 'getRelations' ), $this->relations );
+    }
+
+    /**
+     * Normalises the CRUD's $relations array so that model-based entries
+     * (written as [ModelClass::class, 'methodName']) are expanded into the
+     * canonical 4-element SQL-join format that the query builder expects.
+     *
+     * Supports two model-based syntaxes inside a junction group:
+     *
+     *   // No explicit alias – SQL alias defaults to the method name ('user')
+     *   'leftJoin' => [
+     *       [ User::class, 'user' ],
+     *   ]
+     *
+     *   // Explicit alias as the array key – useful when the same model is
+     *   // joined twice or when you prefer a different name for the column prefix
+     *   'leftJoin' => [
+     *       'author'   => [ User::class, 'user' ],
+     *       'approver' => [ User::class, 'approvedBy' ],
+     *   ]
+     *
+     * A leading '@' on the key is stripped so that both 'author' and '@author'
+     * are equivalent (the '@' form is tolerated but discouraged).
+     *
+     * Raw-array relations are passed through unchanged for full backward-compatibility.
+     * The method also collects the $hidden fields declared on each related Eloquent model
+     * so they can be excluded from the SELECT at the column-listing step.
+     *
+     * @return array{0: array, 1: array<string, string[]>} [$normalizedRelations, $hiddenByAlias]
+     */
+    private function resolveRelations(): array
+    {
+        $normalized = [];
+        $hiddenByAlias = [];
+
+        foreach ( $this->getRelations() as $junction => $relation ) {
+            if ( is_numeric( $junction ) ) {
+                /**
+                 * Numeric key: either an old-style single raw entry
+                 *   ['table', 'fk', '=', 'pk']
+                 * or a new model-based single entry
+                 *   [User::class, 'methodName']   (defaults to leftJoin)
+                 */
+                if (
+                    isset( $relation[0] ) &&
+                    is_string( $relation[0] ) &&
+                    class_exists( $relation[0] ) &&
+                    is_subclass_of( $relation[0], Model::class )
+                ) {
+                    $junctionType = $relation[2] ?? 'leftJoin';
+                    // Numeric outer key: no alias override, falls back to method name.
+                    [ $rawRelation, $hidden ] = $this->expandModelRelation( $relation[0], $relation[1] );
+                    $hiddenByAlias[$relation[1]] = $hidden;
+                    $normalized[$junctionType][] = $rawRelation;
+                } else {
+                    // Old raw format – keep as-is.
+                    $normalized[$junction] = $relation;
+                }
+            } else {
+                /**
+                 * Junction-keyed group, e.g.:
+                 *   'leftJoin' => [ 'author' => [User::class, 'user'], ... ]
+                 * or the existing raw group:
+                 *   'leftJoin' => [ ['table as alias', 'fk', '=', 'pk'] ]
+                 */
+                $resolvedGroup = [];
+
+                foreach ( $relation as $aliasKey => $entry ) {
+                    if (
+                        isset( $entry[0] ) &&
+                        is_string( $entry[0] ) &&
+                        class_exists( $entry[0] ) &&
+                        is_subclass_of( $entry[0], Model::class )
+                    ) {
+                        /**
+                         * Determine the SQL alias:
+                         *   - String key (e.g. 'author' or '@author') → use it as the alias.
+                         *   - Numeric key → fall back to the method name (second element).
+                         * A leading '@' is stripped so both forms are accepted.
+                         */
+                        $explicitAlias = is_numeric( $aliasKey )
+                            ? null
+                            : ltrim( (string) $aliasKey, '@' );
+
+                        [ $rawRelation, $hidden ] = $this->expandModelRelation( $entry[0], $entry[1], $explicitAlias );
+                        $resolvedAlias = $explicitAlias ?? $entry[1];
+                        $hiddenByAlias[$resolvedAlias] = $hidden;
+                        $resolvedGroup[] = $rawRelation;
+                    } else {
+                        $resolvedGroup[] = $entry;
+                    }
+                }
+
+                $normalized[$junction] = $resolvedGroup;
+            }
+        }
+
+        return [ $normalized, $hiddenByAlias ];
+    }
+
+    /**
+     * Expands a single model-based relation entry into the canonical
+     * 4-element join array expected by the query builder, and returns
+     * the $hidden fields declared on the related Eloquent model.
+     *
+     * Only BelongsTo and HasOne relations are supported; attempting to use
+     * HasMany or BelongsToMany will throw an exception.
+     *
+     * @param  string                       $modelClass    Fully-qualified class name of the related model.
+     * @param  string                       $methodName    Name of the relationship method on $this->model.
+     * @param  string|null                  $explicitAlias SQL alias for the joined table; defaults to $methodName.
+     * @return array{0: array, 1: string[]} [$canonicalRelation, $hiddenFields]
+     *
+     * @throws Exception
+     */
+    private function expandModelRelation( string $modelClass, string $methodName, ?string $explicitAlias = null ): array
+    {
+        $alias = $explicitAlias ?? $methodName;
+        if ( empty( $this->model ) || ! class_exists( $this->model ) ) {
+            throw new Exception(
+                __( 'Cannot resolve model-based relations without a model defined on the CRUD instance.' )
+            );
+        }
+
+        $mainModel = new ( $this->model );
+
+        if ( ! method_exists( $mainModel, $methodName ) ) {
+            throw new Exception( sprintf(
+                __( 'The model "%s" does not have a relationship method named "%s".' ),
+                $this->model,
+                $methodName
+            ) );
+        }
+
+        $relation = $mainModel->$methodName();
+
+        if (
+            ! ( $relation instanceof BelongsTo ) &&
+            ! ( $relation instanceof HasOne )
+        ) {
+            throw new Exception( sprintf(
+                __( 'The relationship "%s" on "%s" must be a BelongsTo or HasOne relation for use in CRUD joins.' ),
+                $methodName,
+                $this->model
+            ) );
+        }
+
+        $relatedModel = $relation->getRelated();
+        $relatedTable = $this->hookTableName( $relatedModel->getTable() );
+        $hidden = $relatedModel->getHidden();
+
+        if ( $relation instanceof BelongsTo ) {
+            // Foreign key sits on the main (owning) table.
+            $fk = $this->hookTableName( $this->table ) . '.' . $relation->getForeignKeyName();
+            $ownerKey = $alias . '.' . $relation->getOwnerKeyName();
+        } else {
+            // HasOne: foreign key sits on the related table.
+            $fk = $alias . '.' . $relation->getForeignKeyName();
+            $ownerKey = $this->hookTableName( $this->table ) . '.' . $relation->getLocalKeyName();
+        }
+
+        return [
+            [ $relatedTable . ' as ' . $alias, $fk, '=', $ownerKey ],
+            $hidden,
+        ];
+    }
+
+    /**
+     * Will returns the CRUD component slug
+     */
+    public function getSlug(): string
+    {
+        return $this->slug;
+    }
+
+    /**
+     * Returns a boolean that determine if the options should be displayed
+     * before the crud columns or after the crud columns. This method is defined
+     * for allowing other module to override this behavior.
+     */
+    public function getPrependOptions(): bool
+    {
+        return $this->prependOptions;
+    }
+
+    /**
+     * Get crud instance entries.
+     *
+     * @param array config
+     * @return array entries
+     */
+    public function getEntries( $config = [] ): array
+    {
+        $this->allowedTo( 'read' );
+
+        $table = $this->hookTableName( $this->table );
+        $request = app()->make( Request::class );
+        $query = DB::table( $table );
+        $columnsLongName = [];
+
+        /**
+         * First loop to retrieve the columns and rename it
+         */
+        $select = [];
+
+        /**
+         * Building Select field for primary table
+         * We're caching the table columns, since we would like to
+         * avoid many DB Calls
+         */
+        if ( ! empty( Cache::get( 'table-columns-' . $table ) ) && true === false ) {
+            $columns = Cache::get( 'table-columns-' . $table );
+        } else {
+            $columns = Schema::getColumnListing( $table );
+            Cache::put( 'table-columns-' . $table, $columns, Carbon::now()->addDays( 1 ) );
+        }
+
+        foreach ( $columns as $index => $column ) {
+            $__name = $table . '.' . $column;
+            $columnsLongName[] = $__name;
+            $select[] = $__name . ' as ' . $column;
+        }
+
+        /**
+         * Normalise relations once: this converts model-based entries
+         * (e.g. [User::class, 'user']) into canonical 4-element arrays
+         * and collects hidden fields per alias for SELECT-level filtering.
+         */
+        [ $normalizedRelations, $hiddenByAlias ] = $this->resolveRelations();
+
+        /**
+         * Let's loop relation if they exists
+         */
+        if ( $normalizedRelations ) {
+            /**
+             * we're extracting the joined table
+             * to make sure building the alias works
+             */
+            $relations = [];
+            $relatedTables = [];
+
+            collect( $normalizedRelations )->each( function ( $relation ) use ( &$relations, &$relatedTables ) {
+                if ( isset( $relation[0] ) ) {
+                    if ( ! is_array( $relation[0] ) ) {
+                        $relations[] = $relation;
+
+                        /**
+                         * We do extract the table name
+                         * defined on the relation array
+                         */
+                        $relatedTables[] = $this->__extractTable( $relation );
+                    } else {
+                        collect( $relation )->each( function ( $_relation ) use ( &$relations, &$relatedTables ) {
+                            $relations[] = $_relation;
+
+                            /**
+                             * We do extract the table name
+                             * defined on the relation array
+                             */
+                            $relatedTables[] = $this->__extractTable( $_relation );
+                        } );
+                    }
+                }
+            } );
+
+            $relatedTables = collect( $relatedTables )
+                ->unique()
+                ->push( $this->table ) // the crud table must be considered as a related table as well.
+                ->toArray();
+
+            /**
+             * Build Select for joined table
+             */
+            foreach ( $relations as $relation ) {
+                /**
+                 * We're caching the columns to avoid once again many DB request
+                 */
+                if ( ! empty( Cache::get( 'table-columns-' . $relation[0] ) ) && true == false ) {
+                    $columns = Cache::get( 'table-columns-' . $relation[0] );
+                } else {
+                    /**
+                     * Will ensure to only pick
+                     * some columns from the related tables
+                     */
+                    $table = $relation[0];
+
+                    /**
+                     * If the CRUD instance has some entries
+                     * that are picked, we'll allow extensibility
+                     * using the filter "getPicked".
+                     */
+                    $pick = Hook::filter( self::method( 'getPicked' ), $this->getPicked() );
+
+                    $hasAlias = explode( ' as ', $relation[0] ); // if there is an alias, let's just pick the table name
+                    $hasAlias[0] = $this->hookTableName( $hasAlias[0] ); // make the table name hookable
+                    $aliasName = $hasAlias[1] ?? false; // for aliased relation. The pick use the alias as a reference.
+                    $columns = collect( Schema::getColumnListing( count( $hasAlias ) === 2 ? trim( $hasAlias[0] ) : $relation[0] ) )
+                        ->filter( function ( $column ) use ( $pick, $table, $aliasName, $hiddenByAlias ) {
+                            $alias = $aliasName ? trim( $aliasName ) : $table;
+                            $picked = $pick[$alias] ?? [];
+
+                            if ( ! empty( $picked ) ) {
+                                // When an explicit pick list is defined, it takes full control.
+                                return in_array( $column, $picked );
+                            }
+
+                            // Exclude columns declared as hidden on the related Eloquent model.
+                            if ( in_array( $column, $hiddenByAlias[$alias] ?? [] ) ) {
+                                return false;
+                            }
+
+                            return true;
+                        } )->toArray();
+
+                    Cache::put( 'table-columns-' . $relation[0], $columns, Carbon::now()->addDays( 1 ) );
+                }
+
+                foreach ( $columns as $index => $column ) {
+                    $hasAlias = explode( ' as ', $relation[0] );
+                    $hasAlias[0] = $this->hookTableName( $hasAlias[0] );
+
+                    /**
+                     * If the relation has an alias, we'll
+                     * use the provided alias to compose
+                     * the juncture.
+                     */
+                    if ( count( $hasAlias ) === 2 ) {
+                        $__name = trim( $hasAlias[1] ) . '.' . $column;
+                        $columnsLongName[] = $__name;
+                        $select[] = $__name . ' as ' . trim( $hasAlias[1] ) . '_' . $column;
+                    } else {
+                        $__name = $this->hookTableName( $relation[0] ) . '.' . $column;
+                        $columnsLongName[] = $__name;
+                        $select[] = $__name . ' as ' . $relation[0] . '_' . $column;
+                    }
+                }
+            }
+
+            /**
+             * @var Builder
+             */
+            $query = call_user_func_array( [$query, 'select'], $select );
+
+            foreach ( $normalizedRelations as $junction => $relation ) {
+                /**
+                 * if no junction statement is provided
+                 * then let's make it inner by default
+                 */
+                $junction = is_numeric( $junction ) ? 'join' : $junction;
+
+                if ( in_array( $junction, ['join', 'leftJoin', 'rightJoin', 'crossJoin'] ) ) {
+                    /**
+                     * When the junction is a named key (e.g. 'leftJoin', or an explicit 'join' => [...]),
+                     * $relation is a group (array of relation arrays) and must be iterated.
+                     * When the junction was numeric it was normalised to 'join' above, but $relation
+                     * is already the flat 4-element array — detect that by checking whether the first
+                     * element itself is an array.
+                     */
+                    // If the first element is itself an array, $relation is a group (named junction
+                    // or explicit 'join' => [...]).  Otherwise it is a single flat 4-element array
+                    // (numeric key normalised to 'join') — wrap it so the loop below is uniform.
+                    $relationGroup = is_array( $relation[0] ) ? $relation : [ $relation ];
+
+                    foreach ( $relationGroup as $junction_relation ) {
+                        $hasAlias = explode( ' as ', $junction_relation[0] );
+                        $hasAlias[0] = $this->hookTableName( $hasAlias[0] );
+
+                        /**
+                         * makes sure first table can be filtered. We should also check
+                         * if the column are actual column and not aliases
+                         */
+                        $relatedTableParts = explode( '.', $junction_relation[1] );
+
+                        if ( count( $relatedTableParts ) === 2 && in_array( $relatedTableParts[0], $relatedTables ) ) {
+                            $junction_relation[1] = $this->hookTableName( $relatedTableParts[0] ) . '.' . $relatedTableParts[1];
+                        }
+
+                        /**
+                         * makes sure the second table can be filtered. We should also check
+                         * if the column are actual column and not aliases
+                         */
+                        $relatedTableParts = explode( '.', $junction_relation[3] );
+                        if ( count( $relatedTableParts ) === 2 && in_array( $relatedTableParts[0], $relatedTables ) ) {
+                            $junction_relation[3] = $this->hookTableName( $relatedTableParts[0] ) . '.' . $relatedTableParts[1];
+                        }
+
+                        if ( count( $hasAlias ) === 2 ) {
+                            $query->$junction( trim( $hasAlias[0] ) . ' as ' . trim( $hasAlias[1] ), $junction_relation[1], $junction_relation[2], $junction_relation[3] );
+                        } else {
+                            $query->$junction( $junction_relation[0], $junction_relation[1], $junction_relation[2], $junction_relation[3] );
+                        }
+                    }
+                }
+            }
+        }
+
+        /**
+         * check if the query has a where statement
+         */
+        if ( $this->listWhere ) {
+            foreach ( $this->listWhere as $key => $value ) {
+                if ( count( $this->listWhere ) > 1 ) {
+                    $query->orWhere( $key, $value );
+                } else {
+                    $query->where( $key, $value );
+                }
+            }
+        }
+
+        /**
+         * if hook method is defined and only when conditional argument
+         * that affect result sorting is not active.
+         */
+        if ( method_exists( $this, 'hook' ) && request()->query( 'active' ) === null ) {
+            $this->hook( $query );
+        }
+
+        /**
+         * This section will explicitly add support to CrudScope.
+         */
+        $attributes = $this->reflection->getAttributes( CrudScope::class );
+
+        foreach ( $attributes as $attribute ) {
+            $instance = $attribute->newInstance();
+            $scopeInstance = new $instance->class;
+
+            if ( method_exists( $scopeInstance, 'apply' ) ) {
+                $scopeInstance->apply( $query, new ( $this->getModel() ) );
+            } else {
+                throw new Exception( sprintf(
+                    'The class "%s" must have a method "apply" to be used as a scope.',
+                    $instance->class
+                ) );
+            }
+        }
+
+        /**
+         * try to run the where in statement
+         */
+        if ( $this->whereIn ) {
+            foreach ( $this->whereIn as $key => $values ) {
+                $query->whereIn( $key, $values );
+            }
+        }
+
+        /**
+         * @since 4.5.5
+         * Will filter request using provided
+         * query filters
+         */
+        if ( $request->query( 'queryFilters' ) ) {
+            $filters = json_decode( urldecode( $request->query( 'queryFilters' ) ), true );
+
+            /**
+             * @todo we might need to get the filter from the resource
+             * so that we can parse correctly the provider query filters.
+             */
+            if ( ! empty( $filters ) ) {
+                foreach ( $filters as $key => $value ) {
+                    /**
+                     * we won't handle empty value
+                     */
+                    if ( empty( $value ) ) {
+                        continue;
+                    }
+
+                    $definition = collect( $this->queryFilters )->filter( fn ( $filter ) => $filter['name'] === $key )->first();
+
+                    if ( ! empty( $definition ) ) {
+                        switch ( $definition['type'] ) {
+                            case 'daterangepicker':
+                                if ( $value['startDate'] !== null && $value['endDate'] !== null ) {
+                                    $query->where( $key, '>=', Carbon::parse( $value['startDate'] )->toDateTimeString() );
+                                    $query->where( $key, '<=', Carbon::parse( $value['endDate'] )->toDateTimeString() );
+                                }
+                                break;
+                            default:
+                                /**
+                                 * We would like to apply a specific operator
+                                 * if it's provided to each requests
+                                 */
+                                $this->handleDefinitionOperator(
+                                    $query,
+                                    $definition,
+                                    compact( 'key', 'value' )
+                                );
+                                break;
+                        }
+                    } else {
+                        $query->where( $key, $value );
+                    }
+                }
+            }
+        }
+
+        /**
+         * let's make the "perPage" value adjustable
+         */
+        $perPage = $config['per_page'] ?? 20;
+        if ( $perPage !== false && $request->query( 'per_page' ) ) {
+            $perPage = $request->query( 'per_page' );
+        }
+
+        /**
+         * searching
+         */
+        if ( method_exists( $this, 'applySearch' ) ) {
+            $this->applySearch( $query, $request );
+        } elseif ( $request->query( 'search' ) ) {
+            $query->where( function ( $query ) use ( $request, $columnsLongName ) {
+                foreach ( $columnsLongName as $index => $column ) {
+                    if ( $index == 0 ) {
+                        $query->where( $column, 'like', "%{$request->query( 'search' )}%" );
+                    } else {
+                        $query->orWhere( $column, 'like', "%{$request->query( 'search' )}%" );
+                    }
+                }
+            } );
+        }
+
+        /**
+         * Order the current result, according to the mentionned columns
+         * means the user has clicked on "reorder"
+         */
+        if ( $request->query( 'direction' ) && $request->query( 'active' ) ) {
+            $columns = $this->getColumns();
+            $active = $request->query( 'active' );
+
+            /**
+             * This guard never fired. array_key_exists() was given array_keys( $columns ),
+             * so it looked for the column identifier among the integer keys of a list, and
+             * the flag was read as '$sort' while columns built by CrudTable::column() spell
+             * it 'sort'. A column declared unsortable therefore reached orderBy() anyway,
+             * and for a column assembled in setActions() with nothing behind it in the
+             * database that is a SQL error rather than a refusal.
+             *
+             * Both spellings are accepted because the older cruds still declare '$sort'.
+             */
+            $column = $columns[ $active ] ?? null;
+
+            $cannotSort = $column !== null && ( $column[ 'sort' ] ?? $column[ '$sort' ] ?? true ) === false;
+
+            /**
+             * If for some reason, we're trying to sort
+             * custom columns that doesn't have any reference on the database.
+             */
+            if ( $cannotSort ) {
+                throw new NotAllowedException( sprintf(
+                    __( 'Sorting is explicitly disabled for the column "%s".' ),
+                    $column[ 'label' ]
+                ) );
+            }
+
+            $query->orderBy(
+                $request->query( 'active' ),
+                $request->query( 'direction' )
+            );
+        }
+
+        /**
+         * if some enties ID are provided. These
+         * reference will only be part of the result.
+         */
+        if ( isset( $config['pick'] ) ) {
+            $query->whereIn( $this->hookTableName( $this->table ) . '.id', $config['pick'] );
+        }
+
+        /**
+         * This will allow any module to interact with
+         * the way the query is built.
+         */
+        CrudHookEvent::dispatch( $this, $query );
+
+        // Internal export path: retain permissions/scopes/filters without rendering every row.
+        if (($config['export_ids_only'] ?? false) && $this instanceof \App\Crud\ProductCrud) {
+            return ['data' => $query->reorder()->select($this->hookTableName($this->table).'.id as export_product_id')->distinct()->pluck('export_product_id')->all()];
+        }
+
+        /**
+         * if $perPage is not defined
+         * probably we're trying to return all the entries.
+         */
+        if ( $perPage ) {
+            $entries = $query->paginate( $perPage )->toArray();
+        } else {
+            $entries = ['data' => $query->get()->toArray()];
+        }
+
+        /**
+         * Build the list of fields that should be stripped from every entry.
+         * We merge the CRUD-level $hidden with the model's own $hidden array.
+         */
+        $modelHidden = [];
+        if ( ! empty( $this->model ) && class_exists( $this->model ) ) {
+            $modelHidden = ( new ( $this->model ) )->getHidden();
+        }
+        $hiddenFields = array_unique( array_merge( $this->hidden, $modelHidden ) );
+
+        /**
+         * looping entries to provide inline
+         * options
+         */
+        $entries['data'] = collect( $entries['data'] )->map( function ( $entry ) use ( $hiddenFields ) {
+            $entry = new CrudEntry( (array) $entry );
+
+            /**
+             * apply casting to crud resources
+             * as it's defined by the casting property
+             */
+            $casts = $this->getCasts();
+
+            /**
+             * We'll define a raw property
+             * that will have default uncasted values.
+             */
+            if ( ! isset( $entry->__raw ) ) {
+                $entry->__raw = new \stdClass;
+            }
+
+            if ( ! empty( $casts ) ) {
+                foreach ( $casts as $column => $cast ) {
+                    if ( class_exists( $cast ) ) {
+                        $castObject = new $cast;
+
+                        // We'll keep a reference of the raw
+                        // uncasted property.
+                        $entry->__raw->$column = $entry->$column;
+
+                        // We'll now cast the property.
+                        $entry->$column = $castObject->get( $entry, $column, $entry->$column, [] );
+                    }
+                }
+            }
+
+            /**
+             * We'll allow any resource to mutate the
+             * entries but make sure to keep the originals.
+             */
+            if ( method_exists( $this, 'setActions' ) ) {
+                CrudActionEvent::dispatch( $this, $this->setActions( $entry ) );
+            }
+
+            /**
+             * Remove sensitive fields defined either on the CRUD instance
+             * ($hidden property) or on the underlying Eloquent model.
+             */
+            foreach ( $hiddenFields as $field ) {
+                unset( $entry->$field );
+            }
+
+            return $entry;
+        } );
+
+        return $entries;
+    }
+
+    protected function setActions( CrudEntry $entry ): CrudEntry
+    {
+        return $entry;
+    }
+
+    protected function hookTableName( $tableName ): string
+    {
+        return Hook::filter( 'ns-model-table', $tableName );
+    }
+
+    public function hook( $query ): void
+    {
+        //
+    }
+
+    public function getColumns(): array
+    {
+        return [];
+    }
+
+    /**
+     * Get action
+     *
+     * @return array of actions
+     */
+    public function getActions(): array
+    {
+        return $this->actions;
+    }
+
+    /**
+     * Get link
+     *
+     * @return array of link
+     */
+    public function getLinks(): array
+    {
+        return $this->links;
+    }
+
+    /**
+     * Get route
+     */
+    public function getMainRoute(): string
+    {
+        return $this->mainRoute;
+    }
+
+    /**
+     * Get Model
+     *
+     * @return current model
+     */
+    public function getModel(): string
+    {
+        return $this->model;
+    }
+
+    /**
+     * Get Fillable fields
+     *
+     * @return array of string as field name
+     */
+    public function getFillable(): array
+    {
+        return $this->fillable;
+    }
+
+    /**
+     * Get crud instance
+     */
+    public function getCrudInstance( string $identifier ): CrudService
+    {
+        $crudClass = Hook::filter( 'ns-crud-resource', $identifier );
+
+        /**
+         * In case nothing handle this crud
+         */
+        if ( ! class_exists( $crudClass ) ) {
+            throw new Exception( sprintf( __( 'Unhandled crud resource "%s"' ), $crudClass ) );
+        }
+
+        return new $crudClass;
+    }
+
+    public function getForm()
+    {
+        return [];
+    }
+
+    /**
+     * Will extract form with the entry
+     * as a reference for the values.
+     *
+     * @unused
+     */
+    public function getExtractedForm( $entry = null, $multiEntry = false )
+    {
+        $form = $this->getForm( $entry );
+
+        $final = [];
+
+        if ( isset( $form['main']['validation'] ) ) {
+            $final[$form['main']['name']] = $form['main']['value'];
+        }
+
+        /**
+         * this is specific to products
+         */
+        if ( isset( $form['variations'] ) ) {
+            foreach ( $form['variations'] as $variation ) {
+                if ( $multiEntry ) {
+                    $final['variations'][] = $this->extractTabs( $variation );
+                } else {
+                    $final = array_merge( $final, $this->extractTabs( $variation ) );
+                }
+            }
+        } else {
+            $final = $this->extractTabs( $form );
+        }
+
+        return $final;
+    }
+
+    private function extractTabs( $form )
+    {
+        $final = [];
+
+        foreach ( $form['tabs'] as $tabKey => $tab ) {
+            if ( ! empty( $tab['fields'] ) ) {
+                foreach ( $tab['fields'] as $field ) {
+                    if ( isset( $field['value'] ) ) {
+                        $final[$tabKey][$field['name']] = $field['value'];
+                    }
+                }
+            }
+        }
+
+        return $final;
+    }
+
+    /**
+     * Will returns the defined tabs relations.
+     */
+    public function getTabsRelations(): array
+    {
+        return $this->tabsRelations;
+    }
+
+    public static function table( array $config = [], ?string $title = null, ?string $description = null, ?string $src = null, ?string $createUrl = null, ?array $queryParams = null ): ContractView
+    {
+        $className = get_called_class();
+        $instance = new $className;
+
+        /**
+         * in case the default way of proceeding is not defined
+         * we'll proceed by using the named arguments.
+         */
+        if ( empty( $config ) ) {
+            $config = collect( compact( 'title', 'description', 'src', 'createUrl', 'queryParams' ) )
+                ->filter()
+                ->toArray();
+        }
+
+        /**
+         * If a permission check return "false"
+         * that means performing that action is disabled.
+         */
+        $instance->allowedTo( 'read' );
+
+        $labels = Hook::filter( $instance::method( 'getLabels' ), $instance->getLabels() );
+
+        return View::make( 'pages.dashboard.crud.table', array_merge( [
+            /**
+             * that displays the title on the page.
+             * It fetches the value from the labels
+             */
+            'title' => $labels['list_title'],
+
+            /**
+             * That displays the page description. This allow pull the value
+             * from the labels.
+             */
+            'description' => $labels['list_description'],
+
+            /**
+             * This create the src URL using the "IDENTIIFER".
+             */
+            'src' => ns()->url( '/api/crud/' . $instance::IDENTIFIER ),
+
+            /**
+             * This pull the creation link. That link should takes the user
+             * to the creation form.
+             */
+            'createUrl' => Hook::filter( $instance::method( 'getFilteredLinks' ), $instance->getFilteredLinks() )['create'] ?? false,
+
+            /**
+             * to provide custom query params
+             * to every outgoing request on the table
+             */
+            'queryParams' => [],
+
+            /**
+             * An instance of the current called crud component.
+             */
+            'instance' => $instance,
+        ], $config ) );
+    }
+
+    /**
+     * Will render a crud form using
+     * the provided settings.
+     */
+    public static function form( $entry = null, array $config = [], string $title = '', string $description = '', string $src = '', string $returnUrl = '', string $submitUrl = '', string $submitMethod = '', array $queryParams = [] ): ContractView
+    {
+        /**
+         * We should check if the user is allowed to either create or update
+         * a resource. If not, we'll throw an exception.
+         */
+        $calledClass = get_called_class();
+        $instance = new $calledClass;
+        $instance->allowedTo( $entry === null ? 'create' : 'update' );
+
+        /**
+         * in case the default way of proceeding is not defined
+         * we'll proceed by using the named arguments.
+         */
+        if ( empty( $config ) ) {
+            $config = collect( compact( 'title', 'description', 'src', 'submitUrl', 'queryParams', 'returnUrl', 'submitMethod' ) )
+                ->filter()
+                ->toArray();
+        }
+
+        /**
+         * use crud form to render a valid form.
+         * "view" on the $config might be used to use a custom view file.
+         */
+        return View::make( $config[ 'view' ] ?? 'pages.dashboard.crud.form', self::getFormConfig(
+            config: $config,
+            entry: $entry
+        ) );
+    }
+
+    public static function getFormConfig( $config = [], $entry = null )
+    {
+        $className = get_called_class();
+        $instance = new $className;
+        $permissionType = $entry === null ? 'read' : 'update';
+
+        /**
+         * if a permission for creating or updating is
+         * not disabled let's make a validation.
+         */
+        $instance->allowedTo( $permissionType );
+
+        /**
+         * We'll provide the submit URL
+         */
+        if ( $entry !== null ) {
+            $replacementSubmitUrl = isset( $instance->getLinks()['put'] ) ? str_replace( '{id}', $entry->id, $instance->getLinks()['put'] ) : null;
+        } else {
+            $replacementSubmitUrl = isset( $instance->getLinks()['post'] ) ? $instance->getLinks()['post'] : null;
+        }
+
+        $labels = Hook::filter( get_class( $instance ) . '@getLabels', $instance->getLabels() );
+
+        return array_merge( [
+            /**
+             * Just in case, we provide the entry to the view. It might be used
+             * by a module that need to directly access the entry.
+             */
+            'entry' => $entry,
+
+            /**
+             * We'll provide the form configuration
+             */
+            'form' => Hook::filter( get_class( $instance ) . '@getForm', $instance->getForm( $entry ), [
+                'model' => $entry,
+            ] ),
+
+            /**
+             * We'll now provide the labels
+             */
+            'labels' => Hook::filter( get_class( $instance ) . '@getLabels', $instance->getLabels() ),
+
+            /**
+             * this list all the usable lnks on the resource
+             */
+            'links' => Hook::filter( get_class( $instance ) . '@getLinks', $instance->getLinks() ),
+
+            /**
+             * By default the method used is "post" but might change to "put" according to
+             * whether the entry is provided (Model). Can be changed from the $config.
+             */
+            'submitMethod' => $config['submitMethod'] ?? ( $entry === null ? 'post' : 'put' ),
+
+            /**
+             * We might additionnaly pass the instance itself
+             */
+            'instance' => $instance,
+
+            /**
+             * We'll return here the select attribute that will
+             * be used to automatically popuplate "options" entry of select and search-select field
+             */
+            'optionAttributes' => Hook::filter( get_class( $instance ) . '@getOptionAttributes', $instance->getOptionAttributes() ),
+
+            /**
+             * to provide custom query params
+             * to every outgoing request on the table
+             */
+            'queryParams' => [],
+
+            /**
+             * this pull the title either
+             * the form is made to create or edit a resource.
+             */
+            'title' => $config['title'] ?? ( $entry === null ? $labels['create_title'] : $labels['edit_title'] ),
+
+            /**
+             * this pull the description either the form is made to
+             * create or edit a resource.
+             */
+            'description' => $config['description'] ?? ( $entry === null ? $labels['create_description'] : $labels['edit_description'] ),
+
+            /**
+             * this automatically build a source URL based on the identifier
+             * provided. But can be overwritten with the config.
+             */
+            'src' => $config['src'] ?? ( ns()->url( '/api/crud/' . $instance->getIdentifier() . '/' . ( ! empty( $entry ) ? 'form-config/' . $entry->id : 'form-config' ) ) ),
+
+            /**
+             * this use the built in links to create a return URL.
+             * It can also be overwritten by the configuration.
+             */
+            'returnUrl' => $config['returnUrl'] ?? ( $instance->getLinks()['list'] ?? '#' ),
+
+            /**
+             * This will pull the submitURL that might be different whether the $entry is
+             * provided or not. can be overwritten on the configuration ($config).
+             */
+            'submitUrl' => $config['submitUrl'] ?? $replacementSubmitUrl,
+        ], $config );
+    }
+
+    public function getOptionAttributes()
+    {
+        return $this->optionAttributes;
+    }
+
+    /**
+     * perform a quick check over
+     * the permissions array provided on the instance
+     */
+    public function allowedTo( string $permission ): void
+    {
+        /**
+         * We'll adopt a quite permissive approach: if no permissions are defined, then we won't perform any check.
+         * If permissions are defined, then we'll check if the specific permission is set to false (explicitly disabled) or if it's a string (permission name) that should be checked.
+         *
+         * The reason of this is to not have any clue on why a request is blocked when we've not defined any permission.
+         * This way, the user can start with a permissive approach and then gradually add restrictions by defining permissions.
+         */
+        if ( isset( $this->permissions ) && isset( $this->permissions[$permission] ) ) {
+            if ( $this->permissions[ $permission ] !== false ) {
+                ns()->restrict( $this->permissions[$permission] );
+            } else {
+                throw new NotAllowedException;
+            }
+        }
+    }
+
+    /**
+     * retrieve one of the declared permissions
+     * the name must either be "create", "read", "update", "delete".
+     */
+    public function getPermission( ?string $name ): bool|string
+    {
+        return $this->permissions[$name] ?? false;
+    }
+
+    /**
+     * Shortcut for filtering CRUD methods
+     */
+    public static function filterMethod( string $methodName, callable|array $callback, $priority = 10, $arguments = 1 ): mixed
+    {
+        return Hook::addFilter( self::method( $methodName ), $callback, $priority, $arguments );
+    }
+
+    /**
+     * Return if the table show display raw actions.
+     */
+    public function getShowOptions(): bool
+    {
+        return $this->showOptions;
+    }
+
+    /**
+     * Return if the table show display raw checkboxes.
+     */
+    public function getShowCheckboxes(): bool
+    {
+        return $this->showCheckboxes;
+    }
+
+    /**
+     * Returns the defined casts
+     */
+    public function getCasts(): array
+    {
+        return $this->casts;
+    }
+
+    /**
+     * We want to restrict links if matching
+     * permissons is explicitly disabled by the user
+     */
+    public function getFilteredLinks(): array
+    {
+        $links = $this->getLinks();
+
+        $mapping = [
+            'create' => ['post', 'create'],
+            'read' => ['list'],
+            'update' => ['put', 'update'],
+            'delete' => ['delete'],
+        ];
+
+        return collect( $links )
+            ->filter( function ( $value, $key ) use ( $mapping ) {
+                $rightVerb = collect( $mapping )->map( fn ( $value, $mapKey ) => (
+                    in_array( $key, $value ) ? $mapKey : false
+                ) )->filter();
+
+                return $this->getPermission( $rightVerb->first() ?: null );
+            } )
+            ->toArray();
+    }
+
+    /**
+     * This will loads the header buttons that can be used
+     * to render custom vue component on the crud table.
+     */
+    public function getHeaderButtons(): array
+    {
+        return [];
+    }
+
+    public function getTableFooter( Output $output )
+    {
+        // ...
+    }
+}

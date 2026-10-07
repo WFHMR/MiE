@@ -1,0 +1,510 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+  xsi:noNamespaceSchemaLocation="https://schema.phpunit.de/10.4/phpunit.xsd" 
+  bootstrap="vendor/autoload.php" 
+  colors="true">
+  <testsuites>
+    <testsuite name="Sequential-1">
+      <directory suffix="TestLanguageFileValidity.php">./tests/Feature</directory>
+      <directory suffix="CreateTestDatabaseSQLite.php">./tests/Feature</directory>
+      <directory suffix="HardResetTest.php">./tests/Feature</directory>
+    </testsuite>
+    <testsuite name="Parallel-1">
+      <directory suffix="GoodsReceiptTest.php">./tests/Feature</directory>
+      <directory suffix="ReplenishmentReportTest.php">./tests/Feature</directory>
+      <directory suffix="BusinessDashboardChartsTest.php">./tests/Feature</directory>
+      <directory suffix="ScheduledPriceTest.php">./tests/Feature</directory>
+      <directory suffix="PerformanceManagementTest.php">./tests/Feature</directory>
+      <directory suffix="SalesWorkflowTest.php">./tests/Feature</directory>
+      <directory suffix="PurchasingWorkflowTest.php">./tests/Feature</directory>
+      <directory suffix="MigrationEndpointAccessTest.php">./tests/Feature</directory>
+      <directory suffix="UnitIdentifierTest.php">./tests/Feature</directory>
+      <directory suffix="UnitApiValidationTest.php">./tests/Feature</directory>
+      <directory suffix="UnitGroupDeletionTest.php">./tests/Feature</directory>
+      <directory suffix="ProductionExceptionHandlingTest.php">./tests/Feature</directory>
+      <directory suffix="ExceptionsTest.php">./tests/Feature</directory>
+      <directory suffix="TestAllDateTimeOptions.php">./tests/Feature</directory>
+      <directory suffix="CrudTest.php">./tests/Feature</directory>
+      <directory suffix="FieldsTest.php">./tests/Feature</directory>
+      <directory suffix="UploadModuleTest.php">./tests/Feature</directory>
+      <directory suffix="TestSetOrderType.php">./tests/Feature</directory>
+      <directory suffix="OptionSavingTest.php">./tests/Feature</directory>
+      <directory suffix="DuplicateOptionsTest.php">./tests/Feature</directory>
+      <directory suffix="ThaiTranslationIntegrityTest.php">./tests/Feature</directory>
+      <!-- Reads source files and rewrites one role row. Cheap, and independent of the catalogue. -->
+      <directory suffix="NoUpstreamBrandingTest.php">./tests/Feature</directory>
+
+      <!-- Reads the header markup and app-init.ts, plus one session switch. The branch picker
+           was written with Alpine directives on a build that has no Alpine, so every click was
+           ignored silently. Nothing failed, which is why it went unnoticed. -->
+      <directory suffix="BranchPickerWiringTest.php">./tests/Feature</directory>
+      <directory suffix="OrderBranchAttributionTest.php">./tests/Feature</directory>
+      <directory suffix="TestOtherGetRoutes.php">./tests/Feature</directory>
+      <directory suffix="ManageRoleTest.php">./tests/Feature</directory>
+      <!-- Nothing could be deleted from the role list: the resource called detach() on the
+           permissions relation, which is a "has many through" and has no detach(). Pins the
+           deletion, the removal of the permission rows along with it, the refusal when users
+           are still assigned, and that the bulk action applies the same rules. -->
+      <directory suffix="DeleteRoleTest.php">./tests/Feature</directory>
+      <directory suffix="RefreshReportForPassDaysTest.php">./tests/Feature</directory>
+      <directory suffix="RenderCrudFormTest.php">./tests/Feature</directory>
+      <directory suffix="SaveSettingsTest.php">./tests/Feature</directory>
+      <directory suffix="CrudEditEntitiesTest.php">./tests/Feature</directory>
+      <directory suffix="AuthenticationTest.php">./tests/Feature</directory>
+      <!-- The shift closing document. Pins the drawer arithmetic (cash in and cash out were left out
+           of the expected figure, so any till handling cash by hand was reported over or short) and
+           pins that one branch cannot read another branch's takings by editing the URL. -->
+      <directory suffix="ShiftClosingSummaryTest.php">./tests/Feature</directory>
+      <!-- The slip is handed over with the cash, so it has to be printed by the act of closing. It
+           was only reachable from a button inside the History popup, which nobody opens at the end of
+           a shift: the access log recorded no request for the document at all while shifts were being
+           closed daily. Pins the call, its order against dropping the till reference, and the bundle. -->
+      <directory suffix="ShiftClosingPrintsOnCloseTest.php">./tests/Feature</directory>
+      <!-- The permission manager listed every tick box in English because a permission's label is a
+           database value and nothing passed it through the translator, even though lang/th.json had
+           held Thai for all of them. Also pins the namespace, which roles are saved by. -->
+      <directory suffix="PermissionLabelsAreTranslatedTest.php">./tests/Feature</directory>
+      <!-- The create-user form used to start with Active set to No, and an account saved that way
+           cannot sign in at all: the sign in check drops the session again, and no activation mail
+           can leave a shop's own server. Two live accounts were created that way and neither could
+           log in. Asserts the form's default and both sides of the sign in consequence. -->
+      <directory suffix="UserCanSignInAfterBeingCreatedTest.php">./tests/Feature</directory>
+      <directory suffix="ApiUnauthenticatedResponseTest.php">./tests/Feature</directory>
+      <directory suffix="MarketplaceNotConfiguredTest.php">./tests/Feature</directory>
+      <directory suffix="GrantedPermissionAccessTest.php">./tests/Feature</directory>
+      <directory suffix="SanctumStatefulDomainsTest.php">./tests/Feature</directory>
+      <directory suffix="EnvEditorTest.php">./tests/Feature</directory>
+      <directory suffix="DatabaseBackupCommandTest.php">./tests/Feature</directory>
+      <directory suffix="SetTimezoneCommandTest.php">./tests/Feature</directory>
+
+      <!-- Both build their own units and products, so they need the schema but none of
+           the shared catalogue the Sequential-2 suite creates. -->
+      <directory suffix="MultiUnitStockDeductionTest.php">./tests/Feature</directory>
+      <directory suffix="ImportMultiUnitProductsTest.php">./tests/Feature</directory>
+
+      <!-- Goods the shop breaks open and weighs out itself: a ten kilo sack sold at a hundred
+           grams, two hundred, half a kilo and a kilo, all off one figure. Builds its own unit
+           group and product, so it needs the schema and nothing else. -->
+      <directory suffix="RepackagedGoodsStockTest.php">./tests/Feature</directory>
+
+      <!-- Receiving and counting goods by scanning the shelf, on the stock page that could only be fed
+           a spreadsheet before. Pins the two modes, the base-unit conversion that stops a pack being
+           sellable twice, the branch a row belongs to, that goods not yet priced can still be received,
+           and the import lock it shares with the file upload. Builds its own branches, units and
+           products and tears them down by hand, because the endpoint opens a transaction per line. -->
+      <directory suffix="InventoryScanEntryTest.php">./tests/Feature</directory>
+
+      <!-- The counted-sheet importer. Builds its own branches, units and products. It used to
+           write one figure onto every unit row of every branch, so this suite is what stops that
+           returning. -->
+      <directory suffix="ImportStockFromCsvTest.php">./tests/Feature</directory>
+
+      <!-- Receiving goods that hold their stock on a base unit. Buying five kilos of loose sugar
+           used to put five onto the kilo price label instead of fifty onto the row the till reads.
+           Builds its own provider, units and product. -->
+      <directory suffix="ProcurementUnitConversionTest.php">./tests/Feature</directory>
+
+      <!-- The purchase desk's day walked end to end: raise a purchase with goods on it, find it on the
+           list, open it, correct it, save it again, print it, settle it, receive it and delete it. The
+           document fields are pinned elsewhere; what this pins is the journey, because a purchase that
+           can be created but not re-saved cannot be paid against. Builds its own provider, unit group,
+           unit and product, so it needs the schema and nothing from the shared catalogue. -->
+      <directory suffix="ProcurementWorkflowTest.php">./tests/Feature</directory>
+
+      <!-- Unit conversion arithmetic, no database. Existed unlisted, so neither test had ever run, and
+           the second was failing: getPurchasePriceFromUnit divided before multiplying and rounded the
+           intermediate to currency precision, returning 49.98 where 50.00 was correct. -->
+      <directory suffix="ProductUnitItemTest.php">./tests/Feature</directory>
+
+      <!-- ScaleBarcodeTest was deleted in §40 rather than listed. It was written against an API that
+           was never built: it called generateScaleBarcode(), getConfiguration(), extractProductCode()
+           and extractValue(), none of which exist on ProductService. Its one testable barcode literal
+           was also 13 digits while its own comment described 12, and the implementation computes
+           prefix(1) + product(5) + value(5) + check(1) = 12, so detection refused it.
+
+           Nine of its ten tests failed. Keeping it meant either building four methods nobody asked
+           for or leaving the suite red, so it was removed. Scale-barcode support is not a shipped
+           feature; if it is ever built, write the tests alongside it. The deleted file is kept at
+           /root/backups/removed-orphan-tests-20260918/ (see PENDING-WORK-RESUME.md §16 and §40). -->
+
+      <!-- Same: builds its own two branches, units and products. Pins that a stock movement
+           reaches exactly one branch's row. -->
+      <directory suffix="BranchScopedStockDeductionTest.php">./tests/Feature</directory>
+
+      <!-- Three branches, because two cannot catch a fallback reaching for the wrong shelf.
+           Builds its own branches, tills, units and products. -->
+      <directory suffix="MultiBranchScalingTest.php">./tests/Feature</directory>
+
+      <!-- Reads the products list column builder directly. Builds its own branches and products. -->
+      <directory suffix="BranchScopedProductListTest.php">./tests/Feature</directory>
+      <!-- The stock pages the shop actually reads. The per-product quantities page filtered only on
+           product_id and carried no branch column, so three branches produced three identical
+           looking rows; the stock and low-stock reports loaded every branch and the page summed
+           them, presenting a company total as one shelf. -->
+      <directory suffix="BranchScopedInventoryViewTest.php">./tests/Feature</directory>
+      <!-- Deleting a product in one branch emptied every other branch's shelf: the product is one
+           company-wide row and deleteProductRelations() drops its unit quantities without a branch
+           condition. Also covers the stock row endpoint that deletes by bare id. -->
+      <directory suffix="BranchScopedProductDeletionTest.php">./tests/Feature</directory>
+      <!-- The label page could not print a usable label: barcode images are only written when a
+           product is saved through the form or received through a procurement, so an imported
+           catalogue had almost none and every label printed a broken picture. Covers the on demand
+           image route, the fallback for codes their declared type cannot encode, and the settings
+           panel that stayed English. -->
+      <directory suffix="PrintLabelsPageTest.php">./tests/Feature</directory>
+      <!-- The sticker sizes the label page prints on. The page described a label in pixels, held in the
+           browser and forgotten on reload; a sticker is a physical object and the shop uses many sizes
+           with none fixed, so sizes are named, shared, and remembered per branch. -->
+      <directory suffix="LabelPresetTest.php">./tests/Feature</directory>
+      <!-- A scan has to add the unit that was scanned. The sale followed the till while the scan
+           followed the branch picker, so on a till of another branch a retail code opened the unit
+           chooser (a mouse click per item) and a pack code reported the goods as missing. -->
+      <directory suffix="BarcodeScanUnitResolutionTest.php">./tests/Feature</directory>
+      <!-- The auto search ran against fragments of barcodes while the reader was still typing, and
+           complained about every one, so the till showed a wall of errors on goods that scan fine. -->
+      <directory suffix="BarcodeScanNoiseTest.php">./tests/Feature</directory>
+
+      <!-- Creates one product on one bill and asserts the refusal names the bill. Two faults
+           hid each other here: NsDependable read a key Model::related() never writes, and
+           Product pointed the related lookup at product_id instead of order_id. -->
+      <directory suffix="ProductDeletionMessageTest.php">./tests/Feature</directory>
+
+      <!-- Unit declared its dependency in a method spelled setDepedencies, so the
+           method_exists lookup in NsDependable never matched and units could be deleted out
+           from under products that still priced stock in them. Builds its own unit, product
+           and unit quantity row, and includes a positive control so the guard cannot pass by
+           refusing everything. -->
+      <directory suffix="UnitDeletionGuardTest.php">./tests/Feature</directory>
+
+      <!-- Drives the upload endpoint with a file that lists one product twice, which is how the
+           shop's export repeats a product filed under two group codes. The importer created a
+           product per row, so the branch stock was counted once per copy. Cleans up explicitly
+           rather than with DatabaseTransactions, because the controller opens a transaction per
+           row and nesting one around it makes SQLite report "database is locked". -->
+      <directory suffix="InventoryUploadDuplicateTest.php">./tests/Feature</directory>
+      <!-- The same guard seen from the other doors. The upload page is one of seven ways goods are
+           imported; the other six are console commands, and one run beside an upload races
+           identically. Holds the lock and then pushes both a command and the upload endpoint, so an
+           import path added later without the lock fails here instead of in the shop's catalogue. -->
+      <directory suffix="InventoryImportLockTest.php">./tests/Feature</directory>
+
+      <!-- Reads the registered dashboard widgets. No writes. It had never been listed and still
+           described the upstream widget it was written against — name "My NexoPOS", permission
+           manage.modules — while the widget had been turned into the shop's takings panel, so it
+           would have failed on sight. Now pins the Thai name, the manager-level permission, and
+           that no widget anywhere is presented under the upstream product name. -->
+      <directory suffix="WidgetServiceTest.php">./tests/Feature</directory>
+
+      <!-- Pure logic, no database. Listed here because tests/Unit is not otherwise
+           part of any suite, so anything placed there never runs. -->
+      <directory suffix="ThaiBahtTextServiceTest.php">./tests/Unit</directory>
+      <directory suffix="ImportThaiProductCatalogTest.php">./tests/Feature</directory>
+      <directory suffix="ImportCatalogFromCsvTest.php">./tests/Feature</directory>
+      <directory suffix="ThaiVatServiceTest.php">./tests/Feature</directory>
+      <directory suffix="ThaiTaxSettingsTest.php">./tests/Feature</directory>
+    </testsuite>
+    <testsuite name="Sequential-2">
+      <directory suffix="CreateTaxGroupTest.php">./tests/Feature</directory>
+      <directory suffix="CreateTaxTest.php">./tests/Feature</directory>
+      <directory suffix="CreateCustomerGroupTest.php">./tests/Feature</directory>
+      <directory suffix="CreateCustomerTest.php">./tests/Feature</directory>
+      <directory suffix="CustomerCreditTest.php">./tests/Feature</directory>
+      <directory suffix="CreateUnitGroupTest.php">./tests/Feature</directory>
+      <directory suffix="CreateUnitTest.php">./tests/Feature</directory>
+      <directory suffix="CreateCategoryTest.php">./tests/Feature</directory>
+      <directory suffix="CreateProductTest.php">./tests/Feature</directory>
+      <directory suffix="CreateProviderTest.php">./tests/Feature</directory>
+      <directory suffix="TestCogsPrices.php">./tests/Feature</directory>
+      <directory suffix="MakeProcurementTest.php">./tests/Feature</directory>
+
+      <!-- Sits here rather than in a parallel suite because one of its assertions compares the
+           total shown above the purchase order list before and after inserting a row, which another
+           process creating procurements at the same time would invalidate. -->
+      <directory suffix="ProcurementListVisibilityTest.php">./tests/Feature</directory>
+
+      <!-- Needs orders on the database to have anything to summarise, so it runs after the suite that
+           creates them rather than alongside it. -->
+      <directory suffix="SaleReportFiguresTest.php">./tests/Feature</directory>
+
+      <!-- Creates accounts and reads the whole staff list, so it runs where nothing else is adding
+           users at the same time. -->
+      <directory suffix="StaffAndCustomerSeparationTest.php">./tests/Feature</directory>
+      <directory suffix="CreateCouponTest.php">./tests/Feature</directory>
+      <directory suffix="CreateRewardSystemTest.php">./tests/Feature</directory>
+      <directory suffix="TestRewardSystem.php">./tests/Feature</directory>
+      <directory suffix="PerformStockAdjustmentTest.php">./tests/Feature</directory>
+      <directory suffix="ProductAdjustmentTest.php">./tests/Feature</directory>
+      <directory suffix="CreateRegisterTest.php">./tests/Feature</directory>
+      <directory suffix="CashRegisterActionsTest.php">./tests/Feature</directory>
+    </testsuite>
+    <testsuite name="Parallel-2">
+      <directory suffix="CreateOrderOnRegister.php">./tests/Feature</directory>
+      <directory suffix="CreateOrderTest.php">./tests/Feature</directory>
+      <directory suffix="CreateOrderPaidWithCustomerCredit.php">./tests/Feature</directory>
+      <directory suffix="CreateOrderWithDifferentProductPriceMode.php">./tests/Feature</directory>
+      <directory suffix="CreateCustomPaymentTypeAndOrder.php">./tests/Feature</directory>
+      <directory suffix="DeleteOrderTest.php">./tests/Feature</directory>
+      <directory suffix="OrderRefundTest.php">./tests/Feature</directory>
+      <directory suffix="OrderHoldTest.php">./tests/Feature</directory>
+      <directory suffix="OrderWithInstalment.php">./tests/Feature</directory>
+      <directory suffix="PartiallyPaidOrderWithAdjustmentTest.php">./tests/Feature</directory>
+      <directory suffix="DeletingOrderTest.php">./tests/Feature</directory>
+      <directory suffix="CombiningProductsTest.php">./tests/Feature</directory>
+      <directory suffix="ComputeTaxesFromSales.php">./tests/Feature</directory>
+      <directory suffix="CanSeeReportsTest.php">./tests/Feature</directory>
+      <directory suffix="ReportsLoadTheirFiguresTest.php">./tests/Feature</directory>
+      <directory suffix="SoldStockBySupplierTest.php">./tests/Feature</directory>
+      <directory suffix="SoldStockSupplierSourceTest.php">./tests/Feature</directory>
+      <directory suffix="CustomerRouteTest.php">./tests/Feature</directory>
+      <directory suffix="CreateUserTest.php">./tests/Feature</directory>
+      <directory suffix="ProviderRoutePermissionTest.php">./tests/Feature</directory>
+      <directory suffix="ApiRoutePermissionTest.php">./tests/Feature</directory>
+      <directory suffix="OrderProductDiscountTest.php">./tests/Feature</directory>
+      <directory suffix="StockConcurrencyTest.php">./tests/Feature</directory>
+      <directory suffix="ThaiTaxInvoiceTest.php">./tests/Feature</directory>
+      <directory suffix="ThaiVatReturnReportTest.php">./tests/Feature</directory>
+      <directory suffix="ThaiPaymentChannelsTest.php">./tests/Feature</directory>
+      <directory suffix="ThaiWithholdingTaxTest.php">./tests/Feature</directory>
+      <directory suffix="RealtimeBroadcastTest.php">./tests/Feature</directory>
+
+      <!-- Placed after the order tests: the OrderTax relation assertion needs a
+           real order in the shared fixture. -->
+      <directory suffix="TaxCalculatorFixesTest.php">./tests/Feature</directory>
+      <directory suffix="McpServerContractTest.php">./tests/Feature</directory>
+      <directory suffix="UpdateToolsMcpTest.php">./tests/Feature</directory>
+
+      <!-- Placed late: the overdue sweep it exercises flips every expired unpaid
+           order in the fixture to "due", which an earlier order test would notice. -->
+      <directory suffix="CreditTermOrderTest.php">./tests/Feature</directory>
+      <directory suffix="ReceivablesAgingReportTest.php">./tests/Feature</directory>
+
+      <!-- Read-only regression checks, safe to run once the fixture exists. -->
+      <directory suffix="PosGridCategoryTest.php">./tests/Feature</directory>
+      <directory suffix="BranchSelectorRenderTest.php">./tests/Feature</directory>
+      <directory suffix="BarcodeScanWithheldProductTest.php">./tests/Feature</directory>
+
+      <!-- Needs the catalogue. It does orphan an author and clear a product's unit rows,
+           but inside DatabaseTransactions, so the fixture is handed back untouched. -->
+      <directory suffix="ProductCrudColumnsTest.php">./tests/Feature</directory>
+
+      <!-- Placed last of the product tests: it lends a barcode to a product in the shared
+           fixture and hands it back afterwards. Run earlier, the order tests that follow
+           were answering 403. -->
+      <directory suffix="BackfillProductSuppliersTest.php">./tests/Feature</directory>
+      <directory suffix="ThaiCatalogLayoutTest.php">./tests/Feature</directory>
+      <directory suffix="UnitCogsRatioTest.php">./tests/Feature</directory>
+      <!-- The cost cannot be corrected from the product form. Prices and cost are held per branch, so
+           an item stocked in two branches listed each of its units twice and the save was refused
+           outright; the branch was also resolved through an option that is off here, so a save wrote
+           onto another branch's row, a new row carried no branch, and a delivery taken in at one
+           branch recomputed the other branch's cost. -->
+      <directory suffix="ProductCostPerBranchTest.php">./tests/Feature</directory>
+      <!-- Editing cost one product at a time is unusable against 419 unit rows that carry none, 394
+           of them holding goods on the shelf whose sales therefore report the whole price as profit.
+           The screen that was supposed to edit many at once belongs to a module that is not
+           installed, so its config file references an interface that does not exist. Pins the part
+           that can corrupt money: a figure lands on the branch it was typed in, another branch's row
+           is refused outright, the sibling unit is derived but never over a figure the same save
+           stated, and nonsense is refused instead of stored as zero. -->
+      <directory suffix="ProductCostEditorTest.php">./tests/Feature</directory>
+      <!-- Three screens from the shop's own feature list. The purchase report existed but was only
+           listed under จัดซื้อ, where nobody looks for a report. The password policy and the audit
+           trail did not exist at all: eleven screens each carried their own hardcoded min:6, the
+           sign-up request carried only "required", and nothing recorded who did what — author_id
+           cannot answer for a row that has been deleted. -->
+      <directory suffix="PasswordPolicyTest.php">./tests/Feature</directory>
+      <directory suffix="AuditTrailTest.php">./tests/Feature</directory>
+      <directory suffix="PurchaseReportReachableTest.php">./tests/Feature</directory>
+      <directory suffix="DuplicatePaymentTest.php">./tests/Feature</directory>
+      <directory suffix="ProductTaxGroupIsRequiredTest.php">./tests/Feature</directory>
+      <directory suffix="ReceiptShowsInclusiveVatTest.php">./tests/Feature</directory>
+
+      <!-- The supplier list showed 514 long Thai names and no code, because the table had nowhere to
+           keep the code the shop trades by and the importer read the name column while skipping the
+           code column beside it. Creates its own suppliers and its own small catalogue file inside
+           DatabaseTransactions, and deletes the file it wrote. -->
+      <directory suffix="ProviderCodeTest.php">./tests/Feature</directory>
+
+      <!-- Module loading died with "Typed property ModulesService::$options must not be accessed
+           before initialization" whenever the installed check answered differently at construction
+           than it did later in the request, which a cleared cache during a deploy is enough to cause.
+           Writes nothing: it only moves the cached answer to that check, and puts it back. -->
+      <directory suffix="ModulesServiceOptionsTest.php">./tests/Feature</directory>
+
+      <!-- Rewrites the currency options, so it has to run after SaveSettingsTest rather
+           than alongside it. DatabaseTransactions puts them back. -->
+      <directory suffix="CurrencyFormattingDefaultsTest.php">./tests/Feature</directory>
+
+      <!-- Creates its own products inside DatabaseTransactions, and needs a branch to exist. -->
+      <directory suffix="InventoryUploadPageTest.php">./tests/Feature</directory>
+
+      <!-- Same as above, for the one-row-per-product unit ladder layout. Builds its own
+           unit groups and products, all inside DatabaseTransactions. -->
+      <directory suffix="InventoryUploadLadderTest.php">./tests/Feature</directory>
+
+      <!-- Imports the templates shipped in public/samples, so an edit to a file the shop hands to its
+           staff is caught here rather than at a counter. -->
+      <directory suffix="InventoryUploadTemplateTest.php">./tests/Feature</directory>
+
+      <!-- The third upload layout, for goods the shop breaks open itself: sizes stated as the
+           figure a scale shows rather than as a multiple of the rung below. Builds its own
+           products inside DatabaseTransactions and needs a branch to exist. -->
+      <directory suffix="InventoryUploadDividedTest.php">./tests/Feature</directory>
+
+      <!-- Loads the two divided-goods files shipped in public/samples and checks the arithmetic
+           each of their eight worked cases claims to demonstrate. -->
+      <directory suffix="DividedGoodsTemplateTest.php">./tests/Feature</directory>
+
+      <!-- The inventory of every sample file the upload page offers, loaded as it ships. Fails if a
+           download link points at nothing, if the page and the disk disagree on a name, or if a file
+           the page offers has no coverage — which is how sample-branch-export.csv came to be handed
+           out with nothing proving it loads. -->
+      <directory suffix="SampleCsvFilesTest.php">./tests/Feature</directory>
+
+      <!-- Moving stock between branches. The feature had never worked: the row builder called a method
+           CrudEntry does not have, so the list page answered 500 as soon as one transfer existed, and
+           approving threw twice over on mass assignment, which the caller reported to the operator as
+           "Add [product_id] to fillable property". Approving and cancelling were also GET routes reached
+           by a link, so anything that follows links moved goods between branches. Builds its own
+           branches and stock rows inside DatabaseTransactions. -->
+      <directory suffix="StockTransferPageTest.php">./tests/Feature</directory>
+
+      <!-- Nothing that changes data answers a GET. Eleven endpoints did — settling a supplier invoice,
+           executing a stock adjustment, cancelling a numbered tax certificate, cloning a role, resetting a
+           product, triggering a transaction, writing an offsetting ledger entry, spending a permission grant,
+           rewriting the chart of accounts — and six of those were reached straight from a row action, so a
+           browser prefetch or a pasted url performed them. Reads the route table and the crud files, and
+           makes its writes inside DatabaseTransactions. -->
+      <directory suffix="NoMutatingGetRoutesTest.php">./tests/Feature</directory>
+
+      <!-- One branch's dashboard shows one branch's trade. Every figure on that page was company-wide: the
+           cards read a table with no branch column, the best-customers and best-cashiers panels read running
+           totals kept on the customer and the user, recent orders was the last ten bills anywhere, and the
+           panel that compares branches showed all of them to a cashier allowed in one. Builds its own
+           branches and orders inside DatabaseTransactions. -->
+      <directory suffix="DashboardBranchScopingTest.php">./tests/Feature</directory>
+
+      <!-- The takings panel on the dashboard. It had no endpoint: all three tabs asked the single-day
+           report and read fields off it that the table does not carry, so the two counts beside the amount
+           were always zero, the day's bill count was an amount of money, and the month and the year both
+           showed the same all-time cumulative figure. Builds its own orders inside DatabaseTransactions. -->
+      <directory suffix="DashboardSalesSummaryTest.php">./tests/Feature</directory>
+
+      <!-- Opens every dashboard page that takes a parameter, with a real record behind it. TestOtherGetRoutes
+           walks the dashboard but skips any uri holding a {parameter}, which was 57 pages: every edit form,
+           every receipt, every per-record listing. Nothing opened them, and the refund receipt had been
+           answering "Class Currency not found" for every refund ever made. Creates the three records the
+           shared fixture lacks inside DatabaseTransactions. -->
+      <directory suffix="DashboardParameterisedRoutesTest.php">./tests/Feature</directory>
+
+      <!-- Route table assertions only, no writes. -->
+      <directory suffix="BranchListPageTest.php">./tests/Feature</directory>
+
+      <!-- Writes one option and one notification row, inside DatabaseTransactions. -->
+      <directory suffix="TaskSchedulingNoticeTest.php">./tests/Feature</directory>
+
+      <!-- Named explicitly, not by suffix: "VatReturnReportTest.php" is also a
+           suffix of ThaiVatReturnReportTest.php, which is already listed above, so
+           a suffix match added that file to this suite twice. -->
+      <file>./tests/Feature/VatReturnReportTest.php</file>
+      <directory suffix="TelemetryTest.php">./tests/Feature</directory>
+      <directory suffix="MailRenderingTest.php">./tests/Feature</directory>
+      <directory suffix="VueLifecycleHooksTest.php">./tests/Feature</directory>
+
+      <!-- These need the catalogue, taxes and units the Sequential-2 suite creates,
+           so they cannot sit in Parallel-1 where they ran before any of it existed. -->
+      <directory suffix="HideOutOfStockProductsTest.php">./tests/Feature</directory>
+      <directory suffix="SingleStoreStockReadingTest.php">./tests/Feature</directory>
+      <directory suffix="BranchesRevenueEndpointTest.php">./tests/Feature</directory>
+
+      <!-- Both build their own orders, so they only need a product to point a line at.
+           They are placed here rather than earlier because the next entry clears every
+           order in the database. -->
+      <directory suffix="ThaiTaxInvoiceA4FormTest.php">./tests/Feature</directory>
+      <directory suffix="ThaiBillingNoteTest.php">./tests/Feature</directory>
+      <directory suffix="ThaiDeliveryNoteRegisterTest.php">./tests/Feature</directory>
+      <directory suffix="ThaiDocumentUiWiringTest.php">./tests/Feature</directory>
+
+      <!-- Files that sat in tests/Feature without ever being listed, so none of them had run. Each was
+           triaged on its own against the built fixture before being added here; the ones that failed are
+           accounted for in PENDING-WORK-RESUME.md §16 rather than added and left red.
+
+           They are placed this late because most carry no isolation trait and write to the shared
+           database permanently, so they go after everything that reads the fixture. -->
+      <!-- Named as files, not by suffix: a suffix is matched against the file name alone, so
+           "Mcp/CategoriesMcpTest.php" matched nothing and these five sat unregistered a second time. -->
+      <file>./tests/Feature/Mcp/CategoriesMcpTest.php</file>
+      <file>./tests/Feature/Mcp/CustomersMcpTest.php</file>
+      <file>./tests/Feature/Mcp/DashboardMcpTest.php</file>
+      <file>./tests/Feature/Mcp/OrdersMcpTest.php</file>
+      <file>./tests/Feature/Mcp/ProductsMcpTest.php</file>
+      <directory suffix="CheckMathLibraryTest.php">./tests/Feature</directory>
+      <directory suffix="CrudModelRelationsTest.php">./tests/Feature</directory>
+      <directory suffix="CrudPermissionsTest.php">./tests/Feature</directory>
+      <directory suffix="TestLowStockProducts.php">./tests/Feature</directory>
+      <directory suffix="MediaSettingsTest.php">./tests/Feature</directory>
+      <directory suffix="DeleteExpiredOptionsTest.php">./tests/Feature</directory>
+
+      <!-- The money side of a sale and of receiving goods reaching the ledger. Both files existed but
+           extended Modules\NsGastro\Tests\TestCase, and that module is not installed here, so neither
+           could even be loaded — which is why neither was in any suite and why accounting had no
+           coverage at all beyond expenses. Every trait they use is present in tests/Traits; only the
+           parent class was wrong. Placed before ResetSalesCommandTest, which clears every order. -->
+      <directory suffix="AccountingProcurementTest.php">./tests/Feature</directory>
+      <directory suffix="AccountingOrderTest.php">./tests/Feature</directory>
+
+      <!-- These three write to the shared database with no isolation trait and were added in a second
+           pass, after the batch above proved stable, so that a failure would have been attributable. -->
+      <directory suffix="AccountingExpenseTest.php">./tests/Feature</directory>
+      <directory suffix="HandlePermissionsManagement.php">./tests/Feature</directory>
+      <directory suffix="ResetUserStatsTest.php">./tests/Feature</directory>
+
+      <!-- Updating a product through the API. It had never run and needed four faults cleared before it
+           could: a hardcoded unit group id, a unit picked from the wrong group, two request fields added
+           after it was written, and a barcode value its own barcode type could not carry. Registering it
+           also uncovered a 500 on PUT /api/products when the payload carries no groups key. -->
+      <directory suffix="UpdateProductTest.php">./tests/Feature</directory>
+
+      <!-- Second to last: it clears every order and truncates the report tables, so
+           anything that reads sales data has to have run already. -->
+      <directory suffix="ResetSalesCommandTest.php">./tests/Feature</directory>
+
+      <!-- Last: it resets the administrator's password to authenticate the
+           command, which would otherwise surprise a later test. -->
+      <directory suffix="CreateUserCommandTest.php">./tests/Feature</directory>
+    </testsuite>
+  </testsuites>
+  <coverage>
+    <report>
+      <html outputDirectory="tests/.coverage"/>
+    </report>
+  </coverage>
+  <php>
+    <!-- Must stay lowercase: Laravel compares environment names case sensitively,
+         so "TESTING" makes runningUnitTests() and environment('testing') return
+         false and every test-only guard in the framework and the app silently
+         stops applying. -->
+    <server name="APP_ENV" value="testing"/>
+    <server name="BCRYPT_ROUNDS" value="4"/>
+    <server name="CACHE_DRIVER" value="array"/>
+    <server name="DB_CONNECTION" value="sqlite"/>
+    <server name="DB_DATABASE" value="tests/database.sqlite"/>
+    <server name="DB_HOST" value=""/>
+    <server name="DB_USERNAME" value=""/>
+    <server name="DB_PASSWORD" value=""/>
+    <server name="DB_PREFIX" value="ns_"/>
+    <server name="MAIL_MAILER" value="array"/>
+    <server name="QUEUE_CONNECTION" value="sync"/>
+    <server name="SESSION_DRIVER" value="array"/>
+    <server name="TELESCOPE_ENABLED" value="FALSE"/>
+    <server name="BROADCAST_DRIVER" value="log"/>
+    <server name="SANCTUM_STATEFUL_DOMAINS" value="nexopos-v4.std"/>
+    <server name="SESSION_DOMAIN" value="nexopos-v4.std"/>
+    <server name="NS_VERSION" value="false"/>
+  </php>
+  <source>
+    <include>
+      <directory>app</directory>
+    </include>
+  </source>
+</phpunit>

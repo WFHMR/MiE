@@ -1,0 +1,90 @@
+version: 2
+updates:
+  # Main Composer dependencies
+  - package-ecosystem: composer
+    directory: "/"
+    schedule:
+      interval: daily
+      time: "04:00"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "blair2004"
+    commit-message:
+      prefix: "composer"
+      include: "scope"
+
+  # NS module Composer dependencies
+  - package-ecosystem: composer
+    directory: "/ns"
+    schedule:
+      interval: daily
+      time: "04:00"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "blair2004"
+    commit-message:
+      prefix: "composer(ns)"
+      include: "scope"
+
+  # Main NPM dependencies
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: daily
+      time: "04:00"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "blair2004"
+    commit-message:
+      prefix: "npm"
+      include: "scope"
+    ignore:
+      # Ignore major version updates for core dependencies to avoid breaking changes
+      - dependency-name: "vue"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "vite"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@vitejs/plugin-vue"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "laravel-vite-plugin"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "tailwindcss"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@tailwindcss/vite"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@tailwindcss/postcss"
+        update-types: ["version-update:semver-major"]
+      # Ignore specific versions that might cause issues
+      - dependency-name: "chart.js"
+        versions: ["4.0.0", "4.0.1", "4.1.0"]
+      - dependency-name: "@ckeditor/ckeditor5-build-classic"
+        versions: ["44.0.0"]
+
+  # NS module NPM dependencies
+  - package-ecosystem: npm
+    directory: "/ns"
+    schedule:
+      interval: daily
+      time: "04:30"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "blair2004"
+    commit-message:
+      prefix: "npm(ns)"
+      include: "scope"
+    ignore:
+      # Ignore major version updates for core dependencies to avoid breaking changes
+      - dependency-name: "vue"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "vite"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@vitejs/plugin-vue"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "laravel-vite-plugin"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "tailwindcss"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@tailwindcss/vite"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@editorjs/editorjs"
+        update-types: ["version-update:semver-major"]

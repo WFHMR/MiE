@@ -1,0 +1,179 @@
+<?php
+
+namespace App\Services;
+
+use App\Models\Notification;
+use App\Models\Role;
+use App\Models\User;
+use Exception;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Log;
+use Illuminate\support\Str;
+
+class NotificationService
+{
+    private string $title;
+
+    private string $description;
+
+    private bool $dismissable;
+
+    private string $url;
+
+    private ?string $identifier;
+
+    private string $source;
+
+    private ?Notification $notification;
+
+    private array $actions;
+
+    public function create( string $title, string $description = '', string $url = '#', ?string $identifier = null, string $source = 'system', bool $dismissable = true, array $actions = [] ): self
+    {
+        if ( $description && $title ) {
+            $this->title = $title;
+            $this->url = $url ?: '#';
+            $this->identifier = $identifier ?? $this->generateRandomIdentifier();
+            $this->source = $source ?? 'system';
+            $this->dismissable = $dismissable ?? true;
+            $this->description = $description;
+            $this->actions = $actions;
+
+            return $this;
+        }
+
+        throw new Exception( __( 'Missing required parameters to create a notification' ) );
+    }
+
+    /**
+     * Will dispatch a notification for all the roles
+     * that has permissions belonging to the parameter
+     */
+    public function dispatchForPermissions( array $permissions ): void
+    {
+        $roles = Role::whereHas( 'permissions', function ( $query ) use ( $permissions ) {
+            $query->whereIn( 'namespace', $permissions );
+        } )->get();
+
+        $uniqueRoles = $roles->unique( 'id' );
+
+        if ( $uniqueRoles->isEmpty() ) {
+            Log::alert( 'A notification was dispatched for permissions that aren\'t assigned.', $permissions );
+        }
+
+        $this->dispatchForGroup( $uniqueRoles );
+    }
+
+    /**
+     * Dispatch notification for a specific
+     * users which belong to a user group
+     */
+    public function dispatchForGroup( Role|array|string $role ): void
+    {
+        if ( is_array( $role ) ) {
+            collect( $role )->each( function ( $role ) {
+                $this->dispatchForGroup( $role );
+            } );
+        } elseif ( $role instanceof Collection ) {
+            $role->each( function ( $role ) {
+                $this->dispatchForGroup( $role );
+            } );
+        } elseif ( is_string( $role ) ) {
+            $roleInstance = Role::namespace( $role );
+            $this->dispatchForGroup( $roleInstance );
+        } else {
+            $role->users->map( function ( $user ) {
+                $this->__makeNotificationFor( $user );
+            } );
+        }
+    }
+
+    /**
+     * Dispatch notification for specific
+     * groups using array of group namespace provided
+     */
+    public function dispatchForGroupNamespaces( array $namespaces ): void
+    {
+        $this->dispatchForGroup( Role::in( $namespaces )->get() );
+    }
+
+    private function __makeNotificationFor( User $user ): void
+    {
+        $this->notification = Notification::identifiedBy( $this->identifier )
+            ->for( $user->id )
+            ->first();
+
+        /**
+         * if a notification with the same identifier
+         * has already been issued for the user, we should avoid
+         * issuing new notification.
+         */
+        if ( ! $this->notification instanceof Notification ) {
+            $this->notification = new Notification;
+            $this->notification->user_id = $user->id;
+            $this->notification->title = $this->title;
+            $this->notification->description = $this->description;
+            $this->notification->dismissable = $this->dismissable;
+            $this->notification->source = $this->source;
+            $this->notification->url = $this->url;
+            $this->notification->identifier = $this->identifier;
+            $this->notification->actions = $this->actions;
+            $this->notification->save();
+        } else {
+            $this->notification->title = $this->title;
+            $this->notification->description = $this->description;
+            $this->notification->dismissable = $this->dismissable;
+            $this->notification->source = $this->source;
+            $this->notification->url = $this->url;
+            $this->notification->actions = $this->actions;
+            $this->notification->save();
+        }
+    }
+
+    public function dispatchForUsers( Collection $users ): void
+    {
+        $users->map( function ( $user ) {
+            $this->__makeNotificationFor( $user );
+        } );
+    }
+
+    /**
+     * gnerate random identifier
+     * for a notification.
+     */
+    public function generateRandomIdentifier()
+    {
+        $date = app()->make( DateService::class );
+
+        return 'notification-' . Str::random( 10 ) . '-' . $date->format( 'd-m-y' );
+    }
+
+    public function deleteHavingIdentifier( string $identifier ): void
+    {
+        Notification::identifiedBy( $identifier )
+            ->get()
+            ->each( function ( $notification ) {
+                $notification->delete();
+            } );
+    }
+
+    public function deleteSingleNotification( int $id ): void
+    {
+        $notification = Notification::find( $id );
+
+        if ( $notification->user_id !== auth()->id() ) {
+            throw new Exception( __( 'You are not authorized to delete this notification' ) );
+        }
+
+        $notification->delete();
+    }
+
+    public function deleteNotificationsFor( User $user ): void
+    {
+        Notification::for( $user->id )
+            ->get()
+            ->each( function ( $notification ) {
+                $notification->delete();
+            } );
+    }
+}

@@ -1,0 +1,779 @@
+<?php
+
+namespace App\Services;
+
+use App\Classes\Hook;
+use App\Enums\NotificationsEnum;
+use App\Exceptions\NotEnoughPermissionException;
+use App\Exceptions\NotFoundException;
+use App\Jobs\CheckTaskSchedulingConfigurationJob;
+use App\Models\Migration;
+use App\Models\Notification;
+use App\Models\Permission;
+use App\Models\Role;
+use App\Models\User;
+use Carbon\Carbon;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\App;
+use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Storage;
+use Modules\NsMultiStore\Services\StoresService;
+
+class CoreService
+{
+    /**
+     * @var bool
+     */
+    public $isMultistore = false;
+
+    public $storeID;
+
+    public Options $rootOption;
+
+    public Options $options;
+
+    /**
+     * @var StoresService
+     */
+    public $store;
+
+    public function __construct(
+        public CurrencyService $currency,
+        public UpdateService $update,
+        public DateService $date,
+        public OrdersService $order,
+        public NotificationService $notification,
+        public ProcurementService $procurement,
+        public Options $option,
+        public MathService $math,
+        public EnvEditor $envEditor,
+        public MediaService $mediaService,
+    ) {
+        $this->options = $option;
+    }
+
+    /**
+     * Returns a route to which apply
+     * the filter "ns-route".
+     */
+    public function route( string $route, array $params = [] ): string
+    {
+        return Hook::filter( 'ns-route', false, $route, $params ) ?: route( $route, $params );
+    }
+
+    /**
+     * Returns a route name to which apply
+     * the filter "ns-route-name".
+     */
+    public function routeName( string $name ): string
+    {
+        return Hook::filter( 'ns-route-name', $name );
+    }
+
+    /**
+     * Returns a filtred URL to which
+     * apply the filter "ns-url" hook.
+     */
+    public function url( ?string $url = null, $params = [] ): string
+    {
+        $url = url( Hook::filter( 'ns-url', $url ) );
+
+        return preg_replace_callback( '/\{(\w+)\}/', function ( $matches ) use ( $params ) {
+            $key = $matches[1];
+
+            return isset( $params[$key] ) ? $params[$key] : $matches[0];
+        }, $url );
+    }
+
+    /**
+     * Returns a filtred URL to which
+     * apply the filter "ns-url" hook.
+     */
+    public function asset( string $url ): string
+    {
+        return url( Hook::filter( 'ns-asset', $url ) );
+    }
+
+    /**
+     * check if a use is allowed to
+     * access a page or trigger an error. This should not be used
+     * on middleware or controller constructor.
+     */
+    public function restrict( $permissions, $message = '' ): void
+    {
+        if ( is_array( $permissions ) ) {
+            $passed = collect( $permissions )->filter( function ( $permission ) {
+                if ( is_bool( $permission ) ) {
+                    return $permission;
+                } else {
+                    return $this->allowedTo( $permission );
+                }
+            } )->count() === count( $permissions );
+        } elseif ( is_string( $permissions ) ) {
+            $passed = $this->allowedTo( $permissions );
+        } elseif ( is_bool( $permissions ) ) {
+            $passed = $permissions;
+        }
+
+        if ( ! $passed ) {
+            throw new NotEnoughPermissionException( $message ?:
+                sprintf(
+                    __( 'You do not have enough permissions to perform this action.' ) . '<br>' . __( 'Required permissions: %s' ),
+                    is_string( $permissions ) ? $permissions : implode( ', ', $permissions )
+                )
+            );
+        }
+    }
+
+    /**
+     * Will return the logged user details
+     * that are actually fillable to avoid exposing any sensitive information.
+     */
+    public function getUserDetails(): Collection
+    {
+        return collect( ( new User )->getFillable() )->mapWithKeys( fn( $key ) => [ $key => Auth::user()->$key ] );
+    }
+
+    /**
+     * Will determine if a user is allowed
+     * to perform a specific action (using a permission)
+     */
+    public function allowedTo( array|string $permissions ): bool
+    {
+        if ( is_array( $permissions ) ) {
+            return Gate::any( $permissions );
+        }
+
+        return Gate::allows( $permissions );
+    }
+
+    /**
+     * check if the logged user has a specific role.
+     */
+    public function hasRole( string $roleNamespace ): bool
+    {
+        return Auth::user()
+            ->roles()
+            ->get()
+            ->filter( fn( $role ) => $role->namespace === $roleNamespace )->count() > 0;
+    }
+
+    /**
+     * clear missing migration files
+     * from migrated files.
+     */
+    public function purgeMissingMigrations(): void
+    {
+        $migrations = collect( Migration::get() )
+            ->map( function ( $migration ) {
+                return $migration->migration;
+            } );
+
+        $rawFiles = collect( Storage::disk( 'ns' )
+            ->allFiles( 'database/migrations' ) );
+
+        $files = $rawFiles->map( function ( $file ) {
+            $details = pathinfo( $file );
+
+            return $details[ 'filename' ];
+        } );
+
+        $difference = array_diff(
+            $migrations->toArray(),
+            $files->toArray()
+        );
+
+        foreach ( $difference as $diff ) {
+            Migration::where( 'migration', $diff )->delete();
+        }
+    }
+
+    /**
+     * Returns a boolean if the environment is
+     * on production mode
+     */
+    public function isProduction(): bool
+    {
+        return ! is_file( base_path( 'public/hot' ) );
+    }
+
+    /**
+     * Simplify the manifest to return
+     * only the files to use.
+     */
+    public function simplifyManifest(): Collection
+    {
+        $manifest = json_decode( file_get_contents( base_path( 'public/build/manifest.json' ) ), true );
+
+        return collect( $manifest )
+            ->mapWithKeys( fn( $value, $key ) => [ $key => asset( 'build/' . $value[ 'file' ] ) ] )
+            ->filter( function ( $element ) {
+                $info = pathinfo( $element );
+
+                return $info[ 'extension' ] === 'css';
+            } );
+    }
+
+    /**
+     * Some features must be disabled
+     * if the jobs aren't configured correctly.
+     */
+    public function canPerformAsynchronousOperations(): bool
+    {
+        $lastUpdate = Carbon::parse( ns()->option->get( 'ns_jobs_last_activity', false ) );
+
+        if ( $lastUpdate->diffInMinutes( ns()->date->now() ) > 60 || ! ns()->option->get( 'ns_jobs_last_activity', false ) ) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Check if the tasks scheduling is configured or
+     * will emit a notification to help fixing it.
+     */
+    public function checkTaskSchedulingConfiguration(): void
+    {
+        if ( ns()->option->get( 'ns_jobs_last_activity', false ) === false ) {
+            /**
+             * @var NotificationsEnum;
+             */
+            $this->emitNotificationForTaskSchedulingMisconfigured();
+
+            /**
+             * force dispatching the job
+             * to force check the tasks status.
+             */
+            CheckTaskSchedulingConfigurationJob::dispatch();
+        } else {
+            /**
+             * @var DateService
+             */
+            $date = app()->make( DateService::class );
+            $lastUpdate = Carbon::parse( ns()->option->get( 'ns_jobs_last_activity' ) );
+
+            if ( $lastUpdate->diffInMinutes( $date->now() ) > 60 ) {
+                $this->emitNotificationForTaskSchedulingMisconfigured();
+
+                /**
+                 * force dispatching the job
+                 * to force check the tasks status.
+                 */
+                CheckTaskSchedulingConfigurationJob::dispatch();
+            }
+        }
+    }
+
+    /**
+     * Register the available permissions when
+     * the app is installed as valid gates.
+     */
+    public function registerGatePermissions(): void
+    {
+        /**
+         * We'll define gate by using all available permissions.
+         * Those will be cached to avoid unecessary db calls when testing
+         * wether the user has the permission or not.
+         */
+        if ( Helper::installed() ) {
+            Permission::get()->each( function ( $permission ) {
+                if ( ! Gate::has( $permission->namespace ) ) {
+                    Gate::define( $permission->namespace, function ( User $user ) use ( $permission ) {
+                        $permissions = Cache::remember( 'ns-all-permissions-' . $user->id, 3600, function () use ( $user ) {
+                            return $user->roles()
+                                ->with( 'permissions' )
+                                ->get()
+                                ->map( fn( $role ) => $role->permissions->map( fn( $permission ) => $permission->namespace ) )
+                                ->flatten();
+                        } )->toArray();
+
+                        return in_array( $permission->namespace, $permissions );
+                    } );
+                }
+            } );
+        }
+    }
+
+    /**
+     * This will update the last time
+     * the cron has been active
+     */
+    public function setLastCronActivity(): void
+    {
+        /**
+         * @var NotificationService
+         */
+        $notification = app()->make( NotificationService::class );
+        $notification->deleteHavingIdentifier( NotificationsEnum::NSCRONDISABLED );
+
+        ns()->option->set( 'ns_cron_last_activity', ns()->date->toDateTimeString() );
+    }
+
+    /**
+     * Will check if the cron has been active recently
+     * and delete a ntoification that has been generated for that.
+     */
+    public function checkCronConfiguration(): void
+    {
+        if ( ns()->option->get( 'ns_cron_last_activity', false ) === false ) {
+            $this->emitCronMisconfigurationNotification();
+        } else {
+            /**
+             * @var DateService
+             */
+            $date = app()->make( DateService::class );
+            $lastUpdate = Carbon::parse( ns()->option->get( 'ns_cron_last_activity' ) );
+
+            if ( $lastUpdate->diffInMinutes( $date->now() ) > 60 ) {
+                $this->emitCronMisconfigurationNotification();
+            }
+        }
+    }
+
+    public function checkModulesSymbolicLinks(): void
+    {
+        /**
+         * @var ModulesService $moduleService
+         */
+        $moduleService = app()->make( ModulesService::class );
+
+        /**
+         * @var NotificationService $notificationService
+         */
+        $notificationService = app()->make( NotificationService::class );
+
+        $modules = $moduleService->get();
+
+        foreach ( $modules as $module ) {
+            $tolowercase = strtolower( $module[ 'namespace' ] );
+
+            // we'll check if a symbolic exist for each module
+            if ( ! file_exists( public_path( 'modules/' . $tolowercase ) ) ) {
+                $notification = Notification::where( 'identifier', 'symlink-' . $tolowercase )->first();
+
+                if ( ! $notification instanceof Notification ) {
+                    $notificationService->create(
+                        title: sprintf( __( '%s: Symbolic Link Missing' ), $module[ 'name' ] ),
+                        identifier: 'symlink-' . $tolowercase,
+                        source: 'system',
+                        url: '#',
+                        description: sprintf(
+                            __( 'The symbolic link for the module %s is missing. Your medias might be broken and not display.' ),
+                            $module[ 'name' ]
+                        ),
+                        actions: [
+                            [
+                                'label' => __( 'Create Symbolic Link' ),
+                                'url' => ns()->route( 'ns.dashboard.modules-symlink', [ 'namespace' => $tolowercase ] ),
+                                'data' => compact( 'module' ),
+                            ],
+                        ]
+                    )->dispatchForGroup( Role::namespace( Role::ADMIN ) );
+                }
+            }
+
+            /**
+             * We'll check if the links is broken
+             */
+            if ( ! is_link( public_path( 'modules/' . $tolowercase ) ) ) {
+                $notification = Notification::where( 'identifier', 'symlink-' . $tolowercase )->first();
+
+                if ( ! $notification instanceof Notification ) {
+                    $notificationService->create(
+                        title: sprintf( __( '%s: Symbolic Link Broken' ), $module[ 'name' ] ),
+                        identifier: 'symlink-' . $tolowercase,
+                        source: 'system',
+                        url: '#',
+                        description: sprintf(
+                            __( 'The symbolic link for the module %s is broken. The module assets might not load correctly.' ),
+                            $module[ 'name' ]
+                        ),
+                        actions: [
+                            [
+                                'label' => __( 'Fix Symbolic Link' ),
+                                'url' => ns()->route( 'ns.dashboard.modules-symlink', [ 'namespace' => $tolowercase ] ),
+                                'data' => compact( 'module' ),
+                            ],
+                        ]
+                    )->dispatchForGroup( Role::namespace( Role::ADMIN ) );
+                }
+            }
+        }
+    }
+
+    public function checkSymbolicLinks(): void
+    {
+        if ( ! file_exists( public_path( 'storage' ) ) ) {
+            $notification = Notification::where( 'identifier', NotificationsEnum::NSSYMBOLICLINKSMISSING )
+                ->where( 'user_id', Auth::id() )
+                ->first();
+
+            if ( ! $notification instanceof Notification ) {
+                ns()->option->set( 'ns_has_symbolic_links_missing_notifications', true );
+
+                $notification = app()->make( NotificationService::class );
+                $notification->create(
+                    title: __( 'Symbolic Links Missing' ),
+                    identifier: NotificationsEnum::NSSYMBOLICLINKSMISSING,
+                    source: 'system',
+                    url: '#',
+                    description: __( 'The Symbolic Links to the public directory is missing. Your medias might be broken and not display.' ),
+                    actions: [
+                        [
+                            'label' => __( 'Fix it' ),
+                            'url' => route( 'ns.dashboard.system.fix-symbolic-links' ),
+                            'type' => 'primary',
+                        ],
+                    ]
+                )->dispatchForGroup( Role::namespace( Role::ADMIN ) );
+            }
+        } else {
+            /**
+             * We should only perform this if we have reason to believe
+             * there is some records, to avoid the request triggered for no reason.
+             */
+            if ( ns()->option->get( 'ns_has_symbolic_links_missing_notifications' ) ) {
+                Notification::where( 'identifier', NotificationsEnum::NSSYMBOLICLINKSMISSING )->delete();
+            }
+        }
+    }
+
+    /**
+     * Emit a notification when Cron aren't
+     * correctly configured.
+     */
+    private function emitCronMisconfigurationNotification(): void
+    {
+        $notification = app()->make( NotificationService::class );
+        $notification->create(
+            title: __( 'Cron Disabled' ),
+            identifier: NotificationsEnum::NSCRONDISABLED,
+            source: 'system',
+            url: '#',
+            description: __( "Cron jobs aren't configured correctly on RGBF. This might restrict necessary features. Click here to learn how to fix it." ),
+        )->dispatchForGroup( Role::namespace( Role::ADMIN ) );
+    }
+
+    /**
+     * Emit a notification when workers aren't
+     * correctly configured.
+     */
+    private function emitNotificationForTaskSchedulingMisconfigured(): void
+    {
+        $notification = app()->make( NotificationService::class );
+        $notification->create(
+            title: __( 'Task Scheduling Disabled' ),
+            identifier: NotificationsEnum::NSWORKERDISABLED,
+            source: 'system',
+            url: '#',
+            description: __( 'RGBF is unable to schedule background tasks. This might restrict necessary features. Click here to learn how to fix it.' ),
+        )->dispatchForGroup( Role::namespace( Role::ADMIN ) );
+    }
+
+    /**
+     * Get a valid user for assigning resources
+     * create by the system on behalf of the user.
+     */
+    public function getValidAuthor()
+    {
+        $firstAdministrator = User::where( 'active', true )->
+            whereRelation( 'roles', 'namespace', Role::ADMIN )->first();
+
+        if ( App::runningInConsole() ) {
+            return $firstAdministrator->id;
+        } else {
+            if ( Auth::check() ) {
+                return Auth::id();
+            } else {
+                return $firstAdministrator->id;
+            }
+        }
+    }
+
+    /**
+     * Get the asset file name from the manifest.json file of a module in Laravel.
+     *
+     * @param  int         $moduleId
+     * @return string|null
+     *
+     * @throws NotFoundException
+     */
+    public function moduleViteAssets( string $fileName, $moduleId, $options = [] ): string
+    {
+        $moduleService = app()->make( ModulesService::class );
+        $module = $moduleService->get( $moduleId );
+
+        if ( empty( $module ) ) {
+            throw new NotFoundException(
+                sprintf(
+                    __( 'The requested module %s cannot be found.' ),
+                    $moduleId
+                )
+            );
+        }
+
+        $viteConfigFile = $module[ 'path' ] . 'vite.config.js';
+
+        if ( ! file_exists( $viteConfigFile ) ) {
+            throw new NotFoundException(
+                sprintf(
+                    __( 'The vite.config.js file for the module %s cannot be found.' ),
+                    $module[ 'name' ]
+                )
+            );
+        }
+
+        /**
+         * let's read the outDir value from the vite.config.js file
+         */
+        $viteConfig = file_get_contents( $viteConfigFile );
+
+        $assets = collect( [] );
+        $errors = [];
+
+        /**
+         * We need to define the location of the hot file. We'll start by checking if the vite.config.js file
+         * includes a hotFile variable. The location is it's value.
+         */
+        if ( preg_match( '/hotFile:\s*[\'"](.+?)[\'"]/', $viteConfig, $matches ) ) {
+            $hotFilePath = $matches[1]; // Return the matched hotFile value
+        } else {
+            $hotFilePath = 'Public' . DIRECTORY_SEPARATOR . 'hot';
+        }
+
+        /**
+         * If the hot file is not a file. When we'll load the assets directly from the
+         * manifest.json file.
+         */
+        if ( file_exists( $module[ 'path' ] . $hotFilePath ) ) {
+            $url = file_get_contents( $module[ 'path' ] . $hotFilePath );
+            $pathinfo = pathinfo( $fileName );
+
+            if ( in_array( $pathinfo[ 'extension' ], [ 'js', 'ts', 'tsx', 'jsx' ] ) ) {
+                if ( ! isset( $options['type'] ) || $options['type'] === 'module' ) {
+                    $assets->prepend( '<script type="module" src="' . $url . '/' . $fileName . '" defer></script>' );
+                } else {
+                    $assets->prepend( '<script src="' . $url . '/' . $fileName . '"></script>' );
+                }
+            } elseif ( in_array( $pathinfo[ 'extension'], [ 'css', 'scss' ] ) ) {
+                $assets->push( '<link rel="stylesheet" href="' . $url . '/' . $fileName . '"/>' );
+            } else {
+                throw new NotFoundException(
+                    sprintf(
+                        __( 'The requested file %s is not a valid asset.' ),
+                        $fileName
+                    )
+                );
+            }
+        } else {
+
+            $ds = DIRECTORY_SEPARATOR;
+
+            if ( preg_match( '/outDir:\s*[\'"](.+?)[\'"]/', $viteConfig, $matches ) ) {
+                $buildDirectory = $matches[1]; // Return the matched outDir value
+            } else {
+                $buildDirectory = 'Public' . $ds . 'build'; // Default build directory
+            }
+
+            $possiblePaths = [
+                rtrim( $module['path'], $ds ) . $ds . $buildDirectory . $ds . '.vite' . $ds . 'manifest.json',
+                rtrim( $module['path'], $ds ) . $ds . $buildDirectory . $ds . 'manifest.json',
+            ];
+
+            $buildFolderName = last( preg_split( '/[\/\\\\]/', $buildDirectory ) );
+
+            foreach ( $possiblePaths as $manifestPath ) {
+                if ( ! file_exists( $manifestPath ) ) {
+                    $errors[] = $manifestPath;
+
+                    continue;
+                }
+
+                $manifestArray = json_decode( file_get_contents( $manifestPath ), true );
+
+                if ( ! isset( $manifestArray[ $fileName ] ) ) {
+                    throw new NotFoundException(
+                        sprintf(
+                            __( 'the requested file "%s" can\'t be located inside the manifest.json for the module %s.' ),
+                            $fileName,
+                            $module[ 'name' ]
+                        )
+                    );
+                }
+
+                /**
+                 * checks if a css file is declared as well
+                 */
+                $assetURL = asset( 'modules/' . strtolower( $moduleId ) . '/' . $buildFolderName . '/' . $manifestArray[ $fileName ][ 'file' ] ) ?? null;
+
+                if ( ! empty( $manifestArray[ $fileName ][ 'css' ] ) ) {
+                    $assets = collect( $manifestArray[ $fileName ][ 'css' ] )->map( function ( $url ) use ( $moduleId, $buildFolderName ) {
+                        return '<link rel="stylesheet" href="' . asset( 'modules/' . strtolower( $moduleId ) . '/' . $buildFolderName . '/' . $url ) . '"/>';
+                    } );
+                }
+
+                $pathinfo = pathinfo( $assetURL );
+
+                if ( in_array( $pathinfo[ 'extension' ], [ 'js', 'ts', 'tsx', 'jsx' ] ) ) {
+                    $assets->prepend( '<script type="module" src="' . $assetURL . '"></script>' );
+                } elseif ( in_array( $pathinfo[ 'extension'], [ 'css', 'scss' ] ) ) {
+                    $assets->push( '<link rel="stylesheet" href="' . $assetURL . '"/>' );
+                } else {
+                    throw new NotFoundException(
+                        sprintf(
+                            __( 'The requested file %s is not a valid asset.' ),
+                            $fileName
+                        )
+                    );
+                }
+            }
+
+            if ( count( $errors ) === count( $possiblePaths ) ) {
+                throw new NotFoundException(
+                    sprintf(
+                        __( 'The manifest file for the module %s wasn\'t found on all possible directories: %s.' ),
+                        $module[ 'name' ],
+                        collect( $errors )->join( ', ' ),
+                    )
+                );
+            }
+        }
+
+        return $assets->flatten()->join( '' );
+    }
+
+    public function createSymbolicLinks(): void
+    {
+        // we'll first delete any symbolic links that might exists
+        if ( file_exists( public_path( 'storage' ) ) ) {
+            @unlink( public_path( 'storage' ) );
+        }
+
+        // We'll create a symbolic link using the command line
+        Artisan::call( 'storage:link' );
+    }
+
+    public function checkPublicModulesDirectoryPermissions()
+    {
+        $publicModulesPath = public_path( 'modules' );
+
+        // Check if the directory exists
+        if ( ! is_dir( $publicModulesPath ) ) {
+            return;
+        }
+
+        // Get current permissions
+        $permissions = fileperms( $publicModulesPath );
+        $octalPermissions = substr( sprintf( '%o', $permissions ), -4 );
+
+        // Check if permissions are not 0755
+        if ( $octalPermissions !== '0755' ) {
+            /**
+             * @var NotificationService $notificationService
+             */
+            $notificationService = app()->make( NotificationService::class );
+            $notification = Notification::where( 'identifier', 'public-modules-permissions' )->first();
+
+            if ( ! $notification instanceof Notification ) {
+                $notificationService->create(
+                    title: __( 'Public Modules Directory: Incorrect Permissions' ),
+                    identifier: 'public-modules-permissions',
+                    source: 'system',
+                    url: '#',
+                    description: sprintf(
+                        __( 'The public/modules directory has incorrect permissions (%s instead of 0755). This may cause issues with module assets loading.' ),
+                        $octalPermissions
+                    ),
+                    actions: [
+                        [
+                            'label' => __( 'Fix Permissions' ),
+                            'url' => ns()->route( 'ns.dashboard.modules-fix-permissions' ),
+                            'data' => [],
+                        ],
+                    ]
+                )->dispatchForGroup( Role::namespace( Role::ADMIN ) );
+            }
+        } else {
+            // If permissions are correct, delete any existing notification
+            Notification::where( 'identifier', 'public-modules-permissions' )->delete();
+        }
+    }
+
+    /**
+     * Generate and return a new app key. This is used for the marketplace authentication.
+     * The key is generated by hashing a random string with the app key as the secret.
+     */
+    public function installationId()
+    {
+        return 'ins_' . hash_hmac(
+            'sha256',
+            'nexopos-app-id',
+            config( 'app.key' )
+        );
+    }
+
+    /**
+     * Generate a fingerprint for the marketplace authentication.
+     * This is used to identify the installation on the marketplace and link it to the admin user.
+     */
+    public function fingerprint(): string
+    {
+        $admin = User::where( 'active', true )->whereRelation( 'roles', 'namespace', Role::ADMIN )->first();
+
+        return hash_hmac( 'sha256', implode( '|', [
+            request()->ip(),
+            request()->userAgent(),
+            $admin->id,
+        ] ), config( 'app.key' ) );
+    }
+
+    /**
+     * Get the unique identity of this installation.
+     */
+    public function getIdentity(): array
+    {
+        if ( ! Storage::disk( 'local' )->exists( 'mynexopos/identity.json' ) ) {
+            return $this->createIdentity();
+        }
+
+        return json_decode( Storage::disk( 'local' )->get( 'mynexopos/identity.json' ), true );
+    }
+
+    /**
+     * Create a unique identity for this installation.
+     */
+    public function createIdentity(): array
+    {
+        $keypair = sodium_crypto_sign_keypair();
+
+        $identity = [
+            'installation_id' => $this->installationId(),
+            'fingerprint' => $this->fingerprint(),
+            'public_key' => base64_encode( sodium_crypto_sign_publickey( $keypair ) ),
+            'private_key' => encrypt( base64_encode( sodium_crypto_sign_secretkey( $keypair ) ) ),
+            'created_at' => now()->toDateTimeString(),
+        ];
+
+        Storage::disk( 'local' )->put( 'mynexopos/identity.json', json_encode( $identity, JSON_PRETTY_PRINT ) );
+
+        return $identity;
+    }
+
+    public function getPublicKey(): string
+    {
+        $identity = $this->getIdentity();
+
+        return $identity['public_key'];
+    }
+
+    public function getPrivateKey(): string
+    {
+        $identity = $this->getIdentity();
+
+        return $identity['private_key'];
+    }
+}

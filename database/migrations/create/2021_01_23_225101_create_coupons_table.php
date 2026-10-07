@@ -1,0 +1,81 @@
+<?php
+
+use App\Classes\Schema;
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+
+return new class extends Migration
+{
+    /**
+     * Run the migrations.
+     *
+     * @return void
+     */
+    public function up()
+    {
+        Schema::createIfMissing( 'nexopos_coupons', function ( Blueprint $table ) {
+            $table->id();
+            $table->string( 'name' );
+            $table->string( 'code' );
+            $table->string( 'type' )->default( 'discount' ); // percentage_discount, flat_discount, giveaway
+            $table->float( 'discount_value', 18 )->default( 0 ); // flat value or percentage
+            $table->datetime( 'valid_until' )->nullable(); // unlimited
+            $table->decimal( 'minimum_cart_value', 18, 5 )->default( 0 )->nullable();
+            $table->decimal( 'maximum_cart_value', 18, 5 )->default( 0 )->nullable();
+            $table->datetime( 'valid_hours_start' )->nullable();
+            $table->datetime( 'valid_hours_end' )->nullable();
+            $table->float( 'limit_usage', 18 )->default( 0 ); // unlimited
+            $table->string( 'groups_id' )->nullable();
+            $table->string( 'customers_id' )->nullable();
+
+            /**
+             * The products and quantities a bundle promotion is made of.
+             *
+             * Declared here as well as in database/migrations/2026_10_01_055151, because that file
+             * is at the root of database/migrations and the root set runs before this one — so on
+             * a fresh installation it is skipped.
+             */
+            $table->json( 'bundle_items' )->nullable();
+            $table->integer( 'author_id' );
+            $table->timestamps();
+        } );
+
+        Schema::createIfMissing( 'nexopos_coupons_products', function ( Blueprint $table ) {
+            $table->id();
+            $table->integer( 'coupon_id' );
+            $table->integer( 'product_id' );
+        } );
+
+        Schema::createIfMissing( 'nexopos_coupons_categories', function ( Blueprint $table ) {
+            $table->id();
+            $table->integer( 'coupon_id' );
+            $table->integer( 'category_id' );
+        } );
+
+        Schema::createIfMissing( 'nexopos_coupons_customers', function ( Blueprint $table ) {
+            $table->id();
+            $table->integer( 'coupon_id' );
+            $table->integer( 'customer_id' );
+        } );
+
+        Schema::createIfMissing( 'nexopos_coupons_customers_groups', function ( Blueprint $table ) {
+            $table->id();
+            $table->integer( 'coupon_id' );
+            $table->integer( 'group_id' );
+        } );
+    }
+
+    /**
+     * Reverse the migrations.
+     *
+     * @return void
+     */
+    public function down()
+    {
+        Schema::dropIfExists( 'nexopos_coupons' );
+        Schema::dropIfExists( 'nexopos_coupons_products' );
+        Schema::dropIfExists( 'nexopos_coupons_categories' );
+        Schema::dropIfExists( 'nexopos_coupons_customers' );
+        Schema::dropIfExists( 'nexopos_coupons_customers_groups' );
+    }
+};

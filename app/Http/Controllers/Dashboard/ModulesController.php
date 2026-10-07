@@ -1,0 +1,224 @@
+<?php
+
+/**
+ * RGBF Controller
+ *
+ * @since  1.0
+ **/
+
+namespace App\Http\Controllers\Dashboard;
+
+use App\Http\Controllers\DashboardController;
+use App\Http\Requests\ModuleUploadRequest;
+use App\Models\Notification;
+use App\Services\DateService;
+use App\Services\MarketplaceService;
+use App\Services\ModulesService;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\View;
+use Illuminate\Support\Str;
+
+class ModulesController extends DashboardController
+{
+    public function __construct(
+        protected ModulesService $modules,
+        protected DateService $dateService,
+        protected MarketplaceService $marketplaceService
+    ) {
+        $this->middleware( function ( $request, $next ) {
+            ns()->restrict( [ 'manage.modules' ] );
+
+            return $next( $request );
+        } );
+    }
+
+    public function listModules( $page = '' )
+    {
+        return View::make( 'pages.dashboard.modules.list', [
+            'title' => __( 'Modules List' ),
+            'description' => __( 'List all available modules.' ),
+        ] );
+    }
+
+    public function downloadModule( $identifier )
+    {
+        ns()->restrict( [ 'manage.modules' ] );
+
+        $module = $this->modules->get( $identifier );
+        $download = $this->modules->extract( $identifier );
+        $relativePath = substr( $download[ 'path' ], strlen( base_path() ) );
+
+        return Storage::disk( 'ns' )->download( $relativePath, Str::slug( $module[ 'name' ] ) . '-' . $module[ 'version' ] . '.zip' );
+    }
+
+    /**
+     * Get modules using various statuses
+     *
+     * @param string status
+     * @return array of modules
+     */
+    public function getModules( $argument = '' )
+    {
+        switch ( $argument ) {
+            case 'enabled':
+                $list = $this->modules->getEnabled();
+                break;
+            case 'disabled':
+                $list = $this->modules->getDisabled();
+                break;
+            case 'invalid':
+                $list = $this->modules->getInvalid();
+                break;
+            case '':
+            default:
+                $list = $this->modules->get();
+                break;
+        }
+
+        return [
+            'modules' => $list,
+            'total_enabled' => count( $this->modules->getEnabled() ),
+            'total_disabled' => count( $this->modules->getDisabled() ),
+            'total_invalid' => count( $this->modules->getInvalid() ),
+        ];
+    }
+
+    /**
+     * @param string module identifier
+     * @return array operation response
+     */
+    public function disableModule( $argument )
+    {
+        return $this->modules->disable( $argument );
+    }
+
+    /**
+     * @param string module identifier
+     * @return array operation response
+     */
+    public function enableModule( $argument )
+    {
+        return $this->modules->enable( $argument );
+    }
+
+    /**
+     * @param string module identifier
+     * @return array operation response
+     */
+    public function deleteModule( $argument )
+    {
+        return $this->modules->delete( $argument );
+    }
+
+    public function showUploadModule()
+    {
+        return View::make( 'pages.dashboard.modules.upload', [
+            'title' => __( 'Upload A Module' ),
+            'description' => __( 'Extends RGBF features with some new modules.' ),
+        ] );
+    }
+
+    /**
+     * Upload a module. Except a "module" provided as a file input
+     *
+     * @return Json|Redirect response
+     */
+    public function uploadModule( ModuleUploadRequest $request )
+    {
+        $result = $this->modules->upload( $request->file( 'module' ) );
+
+        if ( $request->expectsJson() ) {
+            return response()->json( $result );
+        } else {
+            /**
+             * if the module upload was successful
+             */
+            if ( $result[ 'status' ] === 'success' ) {
+                return redirect( ns()->route( 'ns.dashboard.modules-list' ) )->with( $result );
+            } else {
+                $validator = Validator::make( $request->all(), [] );
+                $validator->errors()->add( 'module', $result[ 'message' ] );
+
+                return redirect( ns()->route( 'ns.dashboard.modules-upload' ) )->withErrors( $validator );
+            }
+        }
+    }
+
+    public function createSymlink( Request $request )
+    {
+        $module = $request->input( 'module' );
+
+        if ( ! $module ) {
+            return response()->json( [
+                'status' => 'error',
+                'message' => __( 'Module not specified.' ),
+            ], 400 );
+        }
+
+        $this->modules->createSymlink( $module[ 'namespace' ] );
+
+        Notification::find( $request->query( 'notification_id' ) )->delete();
+
+        return response()->json( [
+            'status' => 'success',
+            'message' => __( 'Symbolic link created successfully.' ),
+        ] );
+    }
+
+    /**
+     * Fix the permissions of the public/modules directory
+     *
+     * @return JsonResponse
+     */
+    public function fixPublicModulesPermissions( Request $request )
+    {
+        try {
+            $this->modules->fixPublicModulesDirectoryPermissions();
+
+            // Delete the notification if it exists
+            if ( $request->query( 'notification_id' ) ) {
+                Notification::find( $request->query( 'notification_id' ) )->delete();
+            }
+
+            return response()->json( [
+                'status' => 'success',
+                'message' => __( 'Directory permissions fixed successfully.' ),
+            ] );
+        } catch ( \Exception $e ) {
+            return response()->json( [
+                'status' => 'error',
+                'message' => sprintf( __( 'Failed to fix permissions: %s' ), $e->getMessage() ),
+            ], 500 );
+        }
+    }
+
+    public function showMarketplace( Request $request )
+    {
+        $this->marketplaceService->testConnection();
+
+        $accessToken = ns()->option->get( 'mynexopos_access_token' );
+        $refreshToken = ns()->option->get( 'mynexopos_refresh_token' );
+
+        /**
+         * if the user is authenticated from a specific page, we should redirect him back to this page after authentication.
+         * We use the "return" query parameter for that.
+         */
+        if ( $request->has( 'action' ) && $request->input( 'action' ) === 'authenticate' && $request->has( 'return' ) ) {
+            match ( $request->input( 'return' ) ) {
+                'pos' => $request->session()->put( 'marketplace_auth_redirect_url', route( 'ns.dashboard.pos' ) . '?action=wireless-connect' ),
+                default => null,
+            };
+        }
+
+        $isConnected = ! empty( $accessToken ) && ! empty( $refreshToken );
+
+        return View::make( 'pages.dashboard.modules.marketplace', [
+            'title' => __( 'Module Marketplace' ),
+            'description' => __( 'Connect your RGBF account to access the module marketplace.' ),
+            'isConnected' => $isConnected,
+            'authorizationUrl' => route( ns()->routeName( 'ns.oauth.mynexopos.authorize' ) ),
+        ] );
+    }
+}

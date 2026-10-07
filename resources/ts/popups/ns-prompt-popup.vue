@@ -1,0 +1,65 @@
+<template>
+    <div id="prompt-popup" :class="size" class="rounded-lg overflow-hidden w-[71.43vw] md:w-[42.86vw] flex flex-col shadow-lg">
+        <div class="flex items-center justify-center flex-col flex-auto p-2">
+            <h2 class="text-xl md:text-2xl font-body text-center">{{ title }}</h2>
+            <p class="py-4 text-sm md:text-base text-center">{{ message }}</p>
+        </div>
+        <div class="p-2">
+            <div class="ns-input">
+                <textarea v-if="type === 'textarea'" v-model="input" name="" id="" cols="30" rows="10" class="w-full border-2 p-2"></textarea>
+                <input ref="input" @keypress.enter="emitAction( true )" v-if="type === 'input'" v-model="input" class="w-full border-2 p-2"/>
+            </div>
+        </div>
+        <div class="flex justify-end border-t action-buttons p-3">
+            <button class="h-8 text-sm rounded-md flex items-center justify-center uppercase" @click="emitAction( true )">{{ __( 'Ok' ) }}</button>
+            <button class="h-8 text-sm rounded-md cancel flex items-center justify-center uppercase" @click="reject( false )">{{ __( 'Cancel' ) }}</button>
+        </div>
+    </div>
+</template>
+<script lang="ts">
+import { __ } from '~/libraries/lang';
+export default {
+    props: [ 'popup' ],
+    data() {
+        return {
+            title: '',
+            message: '',
+            input: '',
+            type: 'textarea'
+        }
+    },
+    computed: {
+        size() {
+            return this.popup.params.size || 'h-full w-full'
+        }
+    },
+    mounted() {
+        this.input    =   this.popup.params.input || '';
+        this.title    =   this.popup.params.title;
+        this.message  =   this.popup.params.message;
+        this.type     =   this.popup.params.type;
+
+        /**
+         * We need to look for any textarea or input field and focus on it
+         */
+        setTimeout( () => {
+            this.$el.querySelector( 'textarea' )?.focus();
+            this.$el.querySelector( 'input' )?.select();
+        }, 100 );
+    },
+    methods: {
+        __,
+        emitAction( action ) {
+            this.popup.params.onAction( action ? this.input : action );
+            this.popup.close();
+        },
+        reject( action ) {
+            if( this.popup.params.reject !== undefined ) {
+                this.popup.params.reject( action );
+            }
+            
+            this.popup.close();
+        }
+    }
+}
+</script>

@@ -1,0 +1,128 @@
+@theme {
+    /** Typography */
+    --color-typography: var( --color-gray-800 );
+    --color-fontcolor: var( --color-gray-300 );
+    --color-fontcolor-soft: var( --color-gray-400 );
+    --color-fontcolor-hard: rgb( 107 114 128 );
+
+    /** Surfaces */
+    --color-surface: rgb( 17 35 35 );
+    --color-aside-background: rgb( 15 45 45 );
+    --color-aside-color: rgb( 220 245 245 );
+    --color-aside-menu-background: rgb( 15 45 45 );
+    --color-aside-menu-background-hover: rgb( 20 60 60 );
+    --color-aside-submenu-background: rgb( 20 55 55 );
+    --color-aside-submenu-background-hover: rgb( 30 70 70 );
+    --color-soft-primary: rgb( 50 100 100 );
+    --color-soft-secondary: rgb( 84 162 162 );
+    --color-soft-tertiary: rgb( 130 190 190 );
+    --color-surface-soft: rgb( 229 231 235 );
+    --color-surface-hard: rgb( 250 250 250 );
+    --color-popup-surface: rgb( 25 60 60 );
+    
+    /** Button */
+    --color-button-hover: rgb( 84 162 162 );
+    --color-button-active: rgb( 60 140 140 );
+    
+    /** Input */
+    --color-input-background: rgb( 20 50 50 );
+    --color-input-disabled: rgb( 30 60 60 );
+    --color-input-button: rgb( 30 70 70 );
+    --color-input-button-hover: rgb( 40 85 85 );
+    --color-input-button-active: rgb( 50 100 100 );
+    --color-input-option-hover: rgb( 84 162 162 );
+    --color-input-edge: rgb( 15 45 45 );
+
+    /** Box */
+    --color-box-edge: rgb( 25 65 65 );
+    --color-box-background: rgb( 20 55 55 );
+    --color-box-elevation-background: rgb( 25 65 65 );
+    --color-box-elevation-edge: rgb( 30 75 75 );
+    --color-box-elevation-hover: rgb( 35 85 85 );
+
+    /** CRUD */
+    --color-crud-button-edge: rgb( 25 65 65 );
+    --color-crud-input-background: rgb( 209 213 219 );
+
+    /** POS */
+    --color-pos-button-edge: rgb( 25 65 65 );
+
+    /** Numpad */
+    --color-numpad-background: rgb( 220 245 245 );
+    --color-numpad-typography: rgb( 15 45 45 );
+    --color-numpad-edge: rgb( 25 65 65 );
+    --color-numpad-hover: rgb( 200 235 235 );
+    --color-numpad-hover-edge: rgb( 84 162 162 );
+
+    /** Option */
+    --color-option-hover: rgb( 84 162 162 );
+
+    /** Scroll */
+    --color-scroll-thumb: rgb( 50 100 100 );
+    --color-scroll-track: rgb( 10 30 30 );
+    --color-scroll-popup-thumb: rgb( 50 100 100 );
+
+    /** Pre */
+    --color-pre: rgb( 84 162 162 );
+
+    /** Tabs */
+    --color-tab-active: rgb( 25 65 65 );
+    --color-tab-active-border: rgb( 84 162 162 );
+    --color-tab-inactive: rgb( 15 45 45 );
+    --color-tab-table-th: rgb( 20 55 55 );
+    --color-tab-table-th-edge: rgb( 25 65 65 );
+
+    /** Table */
+    --color-table-th: rgb( 20 55 55 );
+    --color-table-th-edge: rgb( 25 65 65 );
+
+    /** Floating Menu */
+    --color-floating-menu: rgb( 25 65 65 );
+    --color-floating-menu-hover: rgb( 30 80 80 );
+    --color-floating-menu-selected: rgb( 35 90 90 );
+    --color-floating-menu-edge: rgb( 40 95 95 );
+
+    /** Base Accent — RGBF Teal #54a2a2 */
+    --color-primary: rgb( 84 162 162 );
+    --color-secondary: rgb( 60 140 140 );
+    --color-tertiary: rgb( 45 120 120 );
+
+    /** Error */
+    --color-error-primary: var( --color-red-400 );
+    --color-error-secondary: var( --color-red-500 );
+    --color-error-tertiary: var( --color-red-600 );
+    /**
+     * Text sitting on an error surface. This red is light enough on the dark theme
+     * that dark text reads better on it than white.
+     */
+    --color-error-fontcolor: var( --color-red-950 );
+
+    /** Info — using RGBF teal */
+    --color-info-primary: rgb( 84 162 162 );
+    --color-info-secondary: rgb( 60 140 140 );
+    --color-info-tertiary: rgb( 45 120 120 );
+    /** Text sitting on an info surface. */
+    --color-info-fontcolor: rgb( 8 32 32 );
+
+    /** Success */
+    --color-success-primary: var( --color-green-400 );
+    --color-success-secondary: var( --color-green-500);
+    --color-success-tertiary: var( --color-green-600 );
+    /**
+     * Text sitting on a success surface. These greens are bright enough that
+     * dark text reads better on them than white.
+     */
+    --color-success-fontcolor: var( --color-green-950 );
+
+    /** Warning */
+    --color-warning-primary: var( --color-orange-200);
+    --color-warning-secondary: var( --color-orange-400);
+    --color-warning-tertiary: var( --color-orange-600);
+    /** Text sitting on a warning surface. */
+    --color-warning-fontcolor: var( --color-orange-950 );
+
+    /** Default **/
+    --color-default-primary: rgb( 180 220 220 );
+    --color-default-secondary: rgb( 150 200 200 );
+    --color-default-tertiary: rgb( 130 190 190 );
+}

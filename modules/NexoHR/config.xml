@@ -1,0 +1,10 @@
+<?xml version="1.0" ?>
+<module>
+    <namespace>NexoHR</namespace>
+    <version>1.0</version>
+    <author>SWP</author>
+    <name>ระบบบริหารจัดการบุคคล</name>
+    <description>
+        <locale lang="en">HR Management System</locale>
+    </description>
+</module>

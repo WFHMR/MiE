@@ -1,0 +1,51 @@
+<?php
+
+namespace App\Models;
+
+use App\Classes\Model;
+use App\Traits\NsDependable;
+use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+
+/**
+ * @property int    $id
+ * @property string $code       the shop's own supplier code, for example SP520099
+ * @property string $uuid
+ * @property string $first_name
+ * @property string $last_name
+ * @property int    $author_id
+ * @property string $description
+ * @property float  $amount_due
+ * @property float  $amount_paid
+ * @property Carbon $updated_at
+ */
+class Provider extends NsModel
+{
+    use HasFactory, NsDependable;
+
+    protected $table = 'nexopos_' . 'providers';
+
+    protected $guarded = [];
+
+    public function setDependencies()
+    {
+        return [
+            Procurement::class => Model::dependant(
+                local_name: 'name',
+                local_index: 'id',
+                foreign_name: 'code',
+                foreign_index: 'provider_id',
+            ),
+        ];
+    }
+
+    public function procurements()
+    {
+        return $this->hasMany( Procurement::class );
+    }
+
+    public function user()
+    {
+        return $this->belongsTo( User::class, 'author_id' );
+    }
+}

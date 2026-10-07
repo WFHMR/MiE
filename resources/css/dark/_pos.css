@@ -1,0 +1,489 @@
+#loader {
+    @apply bg-surface;
+    p {
+        @apply text-fontcolor;
+    }
+}
+
+#ns-pos-customer-select-popup {
+    .purchase-amount {
+        @apply text-fontcolor;
+    }
+}
+
+#pos-container {
+    @apply bg-surface text-white;
+
+    /**
+     * The barcode bar was lifted out of #pos-grid #grid-header when the till became a
+     * single full width cart, and its styling stayed behind. It happens to be legible on
+     * this dark surface through the inherited text-white, but the borders and the input
+     * background were lost, so it is styled explicitly here as well and stays consistent
+     * with the light theme.
+     */
+    #pos-barcode-bar {
+        @apply text-fontcolor;
+
+        > div {
+            @apply border-pos-button-edge;
+        }
+
+        button {
+            @apply border-pos-button-edge text-fontcolor transition-all duration-150;
+
+            &.pos-button-clicked {
+                @apply bg-input-disabled;
+            }
+
+            &:hover {
+                @apply bg-input-button-hover;
+            }
+        }
+
+        input {
+            @apply bg-box-background text-fontcolor px-3 h-10;
+
+            &::placeholder {
+                @apply text-fontcolor-soft;
+            }
+        }
+    }
+
+    #pos-cart {
+        #tools {
+            .switch-cart {
+                @apply bg-tab-active font-semibold text-fontcolor rounded-t-xl;
+                > span.products-count {
+                    @apply bg-success-primary text-fontcolor rounded-full text-xs px-2;
+                }
+            }
+
+            .switch-grid {
+                @apply bg-tab-inactive border-transparent text-fontcolor-soft rounded-t-xl;
+            }
+        }
+
+        .cart-table {
+            @apply bg-tab-active rounded-b-xl;
+            #cart-toolbox {
+                @apply border-pos-button-edge rounded-t-lg overflow-hidden;
+                > div {
+                    @apply border-pos-button-edge;
+
+                    hr {
+                        @apply bg-pos-button-edge;
+                    }
+
+                    .ns-button {
+                        button {
+                            @apply bg-input-button border-pos-button-edge border-r transition-all duration-150;
+                            &:hover {
+                                @apply bg-input-button-hover scale-105;
+                            }
+                        }
+                    }
+                }
+            }
+            #cart-table-header {
+                @apply text-fontcolor text-xs uppercase tracking-wider font-semibold;
+                > div {
+                    @apply border-pos-button-edge py-3;
+                }
+            }
+            #cart-products-table {
+                a {
+                    @apply border-secondary rounded;
+
+                    &:hover {
+                        @apply text-secondary;
+                    }
+                }
+
+                > div {
+                    @apply text-fontcolor;
+
+                    > div {
+                        @apply border-pos-button-edge;
+                    }
+
+                    .product-item {
+                        > div {
+                            @apply border-pos-button-edge transition-colors duration-150;
+
+                            .remove-product {
+                                @apply border-error-primary rounded-lg;   
+
+                                &:hover {
+                                    @apply text-error-primary scale-110;
+                                }
+                            }
+
+                            .price {
+                                &:hover {
+                                    @apply text-info-secondary;
+                                }
+                            }
+
+                            .wholesale-mode {
+                                @apply text-success-primary bg-transparent border-success-primary rounded-lg;
+                                &:hover {
+                                    @apply text-success-primary bg-transparent;
+                                }
+                            }
+
+                            .normal-mode {
+                                @apply border-info-primary rounded-lg;
+
+                                &:hover {
+                                    @apply text-info-primary;
+                                }
+                            }
+
+                            .product-controls {
+                                @apply text-fontcolor;
+                            }
+                        }
+                    }
+
+                    .quantity-changer {
+                        @apply border-pos-button-edge rounded-lg;
+
+                        > span {
+                            @apply border-info-primary;   
+                        }
+
+                        &:hover {
+                            @apply bg-input-button-hover;
+                        }
+                    }
+
+                    .product-price {
+                        @apply border-pos-button-edge;
+                    }
+                }
+                .empty-cart {
+                    @apply border-pos-button-edge;
+                    h3 {
+                        @apply text-fontcolor-soft text-sm;
+                    }
+                }
+            }
+
+            #cart-products-summary {
+                table {
+                    @apply text-fontcolor text-sm;
+                    tr.success {
+                        td {
+                            @apply bg-success-primary text-success-fontcolor font-semibold;
+
+                            a:hover {
+                                @apply text-tertiary;
+                            }
+                        }
+                    }
+                    td {
+                        @apply border-pos-button-edge py-2;
+                        
+                        a {
+                            @apply border-secondary rounded;
+
+                            &:hover {
+                                @apply text-secondary;
+                            }
+                        }
+                    }
+
+                    .summary-line {
+                        @apply bg-success-primary text-fontcolor;
+
+                        a {
+                            @apply border-white;
+
+                            &:hover {
+                                @apply text-white;
+                            }
+                        }
+                    }
+                }
+            }
+
+            #cart-bottom-buttons {
+                @apply border-pos-button-edge text-white rounded-b-xl overflow-hidden; 
+
+                #pay-button {
+                    @apply bg-success-secondary border-r border-success-secondary font-semibold tracking-wide transition-all duration-200;
+
+                    &:hover, &:active {
+                        @apply bg-success-tertiary/80 scale-[1.02];
+                    }
+                }
+
+                #hold-button {
+                    @apply bg-info-secondary border-r border-info-secondary font-semibold tracking-wide transition-all duration-200;
+
+                    &:hover, &:active {
+                        @apply bg-info-tertiary scale-[1.02];
+                    }
+                }
+
+                #discount-button {
+                    @apply bg-box-background border-r text-fontcolor border-pos-button-edge font-semibold transition-all duration-200;
+
+                    &:hover, &:active {
+                        @apply bg-input-button-active scale-[1.02];
+                    }
+                }
+
+                #void-button {
+                    @apply bg-error-primary border-pos-button-edge font-semibold tracking-wide transition-all duration-200;
+
+                    &:hover, &:active {
+                        @apply bg-error-secondary scale-[1.02];
+                    }
+                }
+            }
+        }
+    }
+
+    #pos-grid {
+        .switch-cart {
+            @apply bg-tab-inactive border-transparent text-fontcolor-soft rounded-t-xl;
+
+            .products-count {
+                @apply bg-success-tertiary text-white rounded-full text-xs px-2;
+            }
+        }
+        .switch-grid {
+            @apply bg-tab-active text-fontcolor rounded-t-xl;
+        }
+
+        #grid-container {
+            @apply bg-tab-active rounded-b-xl;
+
+            #grid-header {
+                @apply border-pos-button-edge text-fontcolor;
+                > div {
+                    @apply border-pos-button-edge;
+                    button {
+                        @apply border-pos-button-edge rounded-lg transition-all duration-150;
+                        &.pos-button-clicked {
+                            @apply bg-input-disabled;
+                            box-shadow: inset 0px 0px 5px 0px #303131;
+                        }
+                        &:hover {
+                            @apply scale-105;
+                        }
+                    }
+                    input {
+                        @apply bg-box-background rounded-lg px-3;
+                    }
+                }
+            }
+
+            #grid-breadcrumb {
+                @apply border-pos-button-edge;
+
+                ul > li {
+                    @apply text-fontcolor;
+                }
+            }
+
+            #pinned-products {
+                @apply border-pos-button-edge text-white bg-primary/50 rounded-lg m-1;
+
+                .pinned-wrapper {
+                    @apply p-2;
+                }
+
+                .small-pinned-product {
+                    @apply bg-input-button hover:bg-primary hover:text-white rounded-lg transition-all duration-150;
+                }
+
+                .cell-item {
+                    @apply border-pos-button-edge rounded-xl overflow-hidden transition-all duration-200;
+
+                    /**
+                     * The label sits on a dark band because this theme's
+                     * fontcolor is light. A light band would hide the text.
+                     */
+                    .cell-item-label {
+                        background:rgb(0 0 0 / 82%);
+                        @apply rounded-b-xl backdrop-blur-sm;
+                    }
+
+                    &:hover {
+                        @apply bg-box-background shadow-lg scale-[1.02];
+                    }
+
+                    h3 {
+                        @apply text-fontcolor text-sm font-medium;
+                    }
+
+                    i, span {
+                        @apply text-fontcolor-soft;
+                    }
+                }
+            }
+
+            #grid-items {
+                @apply text-fontcolor-soft p-2 gap-2;
+
+                .cell-item {
+                    @apply border-pos-button-edge rounded-xl overflow-hidden transition-all duration-200 cursor-pointer;
+
+                    .cell-item-label {
+                        background:rgb(0 0 0 / 73%);
+                        @apply rounded-b-xl backdrop-blur-sm;
+                    }
+
+                    &:hover {
+                        @apply bg-box-background shadow-lg scale-[1.03] border-secondary;
+                    }
+
+                    h3 {
+                        @apply text-fontcolor text-sm font-medium;
+                    }
+
+                    i, span {
+                        @apply text-fontcolor-soft;
+                    }
+                }
+            }
+        }
+    }
+}
+
+#ns-pos-customers {
+    @apply bg-box-background rounded-2xl;
+    .ns-header {
+        @apply border-box-edge rounded-t-2xl;
+        h3 {
+            @apply text-fontcolor;
+        }
+    }
+    .ns-tab-cards {
+        h3, h2 {
+            @apply text-white;
+        }
+    }
+    .ns-body {
+        @apply bg-box-background rounded-b-2xl;
+    }
+}
+
+#ns-order-type {
+    @apply bg-box-background rounded-2xl;
+    h3 {
+        @apply text-fontcolor;
+    }
+    div > div {
+        > i {
+            @apply text-error-primary;
+        }
+        div > p {
+            @apply text-fontcolor;
+        }
+    }
+    .ns-box-body > div {
+        @apply rounded-xl transition-all duration-200;
+        &:hover {
+            @apply scale-105 shadow-lg;
+        }
+        &:hover h4 {
+            @apply text-white;
+        }
+        h4 {
+            @apply text-fontcolor   
+        }
+    }
+}
+
+#ns-units-selector {
+    .overlay {
+        background:rgb(0 0 0 / 73%);
+        @apply backdrop-blur-sm;
+    }
+}
+
+#ns-pos-cash-registers-popup {
+    div.alert {
+        @apply bg-error-secondary rounded-xl;
+    }
+}
+
+#ns-payment-popup {
+    .ns-pos-screen {
+        @apply text-fontcolor text-3xl font-bold;
+    }
+    > div {
+        /**
+         * Same dark teal as the sidebar, so the payment screen reads as part of
+         * the brand rather than as a plain grey sheet.
+         */
+        @apply bg-aside-background rounded-2xl overflow-hidden;
+        h3 {
+            @apply text-aside-color font-semibold;
+        }
+        ul li{
+            @apply text-aside-color transition-all duration-150 rounded-lg;
+            &.ns-payment-gateway.ns-visible, &.ns-payment-list.ns-visible {
+                @apply bg-tertiary text-white rounded-lg;
+            }
+            &:hover {
+                @apply bg-aside-menu-background-hover;
+            }
+            span.ns-label {
+                @apply bg-success-primary text-success-fontcolor rounded-full px-2 text-xs;
+            }
+        }
+        .ns-payment-wrapper {
+            @apply bg-tab-active rounded-xl;
+            ul li {
+                @apply bg-gray-600 text-fontcolor rounded-xl shadow transition-all duration-150;
+                &:hover {
+                    @apply scale-[1.02] shadow-lg;
+                }
+                button.error {
+                    @apply bg-error-tertiary text-white rounded-lg;
+                }
+                button.default {
+                    @apply bg-gray-700 text-white rounded-lg;
+                }
+            }
+        }
+        .ns-payment-buttons {
+            .ns-payment-type-button {
+                @apply text-white bg-info-tertiary rounded-xl font-semibold transition-all duration-200 hover:scale-[1.02];
+            }
+            .ns-submit-button {
+                @apply bg-success-tertiary text-white rounded-xl font-bold text-lg py-4 transition-all duration-200 hover:scale-[1.02] hover:shadow-lg;
+            }
+            .ns-layaway-button {
+                @apply bg-warning-tertiary text-white rounded-xl font-semibold transition-all duration-200 hover:scale-[1.02];
+            }
+            .ns-payment-button {
+                @apply bg-gray-200 text-fontcolor rounded-xl transition-all duration-150;
+                &:hover {
+                    @apply scale-[1.02] shadow-md;
+                }
+                .ns-label {
+                    @apply bg-success-tertiary text-white rounded-full px-2 text-xs;
+                }
+            }
+        }
+        .ns-payment-list {
+            @apply border-t-aside-submenu-background-hover;
+        }
+        .ns-payment-footer {
+            @apply bg-aside-background rounded-b-2xl;
+        }
+    }
+}
+
+/* POS Top header buttons - modern */
+#pos-container .ns-pos-header-button {
+    @apply rounded-xl font-medium transition-all duration-200;
+    &:hover {
+        @apply scale-105 shadow-md;
+    }
+}

@@ -1,0 +1,4 @@
+@extends('pages.dashboard.sales-workflow.layout')
+@section('sales.body')
+<form class="card actions" method="get"><label>สาขา<select name="branch_id">@foreach($branches as $b)<option value="{{ $b->id }}" @selected($branch==$b->id)>{{ $b->name }}</option>@endforeach</select></label><button class="primary">ดูสาขานี้</button></form><section class="card"><div class="table-wrap"><table><thead><tr><th>เอกสาร</th><th>สถานะ</th><th>รายละเอียด</th><th>วันที่สร้าง</th></tr></thead><tbody>@forelse($documents as $d)<tr><td><a href="{{ route('ns.sales.order',$d->id) }}">SO-{{ $d->id }}</a></td><td>@include('pages.dashboard.sales-workflow.status',['status'=>$d->status])</td><td>{{ number_format($d->total,2) }} บาท · ส่งภายใน {{ $d->due_at }}</td><td>{{ $d->created_at }}</td></tr>@empty<tr><td colspan="4">ยังไม่มีเอกสารในสาขานี้</td></tr>@endforelse</tbody></table></div>{{ $documents->links() }}</section>
+@endsection

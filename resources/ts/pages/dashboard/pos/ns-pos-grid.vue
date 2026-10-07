@@ -1,0 +1,683 @@
+<template>
+    <div id="pos-grid" class="flex-auto flex flex-col overflow-hidden">
+        <div id="tools" class="flex pl-2" v-if="visibleSection === 'grid'">
+            <div @click="switchTo( 'cart' )" class="switch-cart flex cursor-pointer rounded-tl-lg rounded-tr-lg px-3 py-2 border-t border-r border-l">
+                <span>{{ __( 'Cart' ) }}</span>
+                <span v-if="order" class="products-count flex items-center justify-center text-sm rounded-full h-6 w-6 ml-1">{{ cartProducts.length }}</span>
+            </div>
+            <div @click="switchTo( 'grid' )" class="switch-grid cursor-pointer rounded-tl-lg rounded-tr-lg px-3 py-2 font-semibold">
+                {{ __( 'Products' ) }}
+            </div>
+        </div>
+        <div id="grid-container" class="rounded shadow  overflow-hidden flex-auto flex flex-col">
+            <div id="grid-header" class="p-2 border-b ">
+                <div class="border rounded flex  overflow-hidden">
+                    <button :title="__( 'Search for products.' )" @click="openSearchPopup()" class="w-10 h-10 border-r  outline-hidden">
+                        <i class="las la-search"></i>
+                    </button>
+                    <button :title="__( 'Toggle merging similar products.' )" @click="posToggleMerge()" :class="settings.ns_pos_items_merge ? 'pos-button-clicked' : ''" class="outline-hidden w-10 h-10 border-r ">
+                        <i class="las la-compress-arrows-alt"></i>
+                    </button>
+                    <template v-if="options.ns_pos_barcode_reader_type === 'wireless'">
+                        <button v-if="! settings.marketplace_connected" :title="__( 'Connect/Disconnect wireless barcode reader.' )" 
+                            @click="inviteToMyRGBFConnexion()"
+                            :class="wirelessBarcodeConnected ? 'text-blue-500' : 'text-red-500'"
+                            class="outline-hidden border-r">
+                            <div class="animate-pulse bg-red-500/10 px-2 h-10 flex items-center justify-center">                                
+                                <i class="las la-exclamation-triangle text-lg animate-pulse"></i>
+                            </div>
+                        </button>
+                        <template v-else>
+                            <ns-pos-grid-wireless-barcode></ns-pos-grid-wireless-barcode>
+                        </template>
+                    </template>
+                    <template v-else>
+                        <button :title="__( 'Toggle auto focus.' )" 
+                            @click="options.ns_pos_force_autofocus = ! options.ns_pos_force_autofocus" 
+                            :class="options.ns_pos_force_autofocus ? 'pos-button-clicked' : ''" 
+                            class="outline-hidden w-10 h-10 border-r">
+                            <i class="las la-barcode"></i>
+                        </button>
+                    </template>
+                    <input ref="search" v-model="barcode" type="text" class="flex-auto outline-hidden px-2 ">
+                </div>
+            </div>
+            <div style="height: 0px">
+                <div v-if="isLoading" class="fade-in-entrance ns-loader">
+                    <div class="bar"></div>
+                </div>
+            </div>
+            <div id="grid-breadcrumb" class="p-2">
+                <ul class="flex">
+                    <li><a @click="loadCategories()" href="javascript:void(0)" class="px-3 ">{{ __( 'Home' ) }} </a> <i class="las la-angle-right"></i> </li>
+                    <li><a @click="loadCategories( bread )" v-for="bread of breadcrumbs" :key="bread.id" href="javascript:void(0)" class="px-3">{{ bread.name }} <i class="las la-angle-right"></i></a></li>
+                </ul>
+            </div>
+            
+            <div v-if="options.ns_pos_enable_pinned_products && pinnedProducts.length > 0" id="pinned-products">
+                <div class="overflow-x-hidden pinned-wrapper">
+                    <div class="shadow-sm grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 divide-x-1 divide-y-1 divide-solid divide-pos-button-edge flex-nowrap flex items-center">
+                        <div @click="addToTheCart( product )" v-for="product of pinnedProducts" :key="product.id" 
+                            :class="options.ns_pos_show_preview_pinned_products ? 'h-36' : 'h-20 small-pinned-product'"
+                            class="cursor-pointer flex flex-col items-center relativ justify-center overflow-hidden relative flex-shrink-0">
+                            <div v-if="options.ns_pos_show_preview_pinned_products" class="h-full w-full flex items-center justify-center overflow-hidden">
+                                <img v-if="product.galleries && product.galleries.filter( i => i.featured ).length > 0" :src="product.galleries.filter( i => i.featured )[0].url" class="object-cover h-full" :alt="product.name"/>
+                                <img v-else-if="hasNoFeatured( product )" :src="product.galleries[0].url" class="object-cover h-full" :alt="product.name"/>
+                                <i v-else="! product.galleries || product.galleries.filter( i => i.featured ).length === 0" class="las la-image text-6xl"></i>
+                            </div>
+                            <div class="w-full absolute z-10 -bottom-10">
+                                <div class="cell-item-label relative w-full flex flex-col items-center justify-center -top-10 h-20 p-2">
+                                    <h3 class="text-sm text-center w-full">{{ product.name }}</h3>
+                                    <template v-if="product.unit_quantities && product.unit_quantities.length === 1">
+                                        <template v-if="options.ns_pos_vat === 'disabled'">
+                                            <span class="text-sm" v-if="product.unit_quantities && product.unit_quantities.length === 1">
+                                                {{ nsCurrency( product.unit_quantities[0].sale_price ) }}
+                                            </span>
+                                        </template>
+                                        <template v-else>
+                                            <span v-if="options.ns_pos_prefered_price === 'gross_prices'" class="text-sm">
+                                                {{ nsCurrency( product.unit_quantities[0].sale_price_gross ) }}
+                                            </span>
+                                            <span v-else class="text-sm">
+                                                {{ nsCurrency( product.unit_quantities[0].sale_price_net ) }}
+                                            </span>
+                                        </template>
+                                    </template>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div id="grid-items" class="overflow-y-auto h-full flex-col flex">
+                <div v-if="hasCategories" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+                    <div @click="loadCategories( category )" v-for="category of categories" :key="category.id" 
+                        class="cell-item w-full h-36 cursor-pointer border flex flex-col items-center justify-center overflow-hidden relative">
+                        <div class="h-full w-full flex items-center justify-center">
+                            <img v-if="category.preview_url" :src="category.preview_url" class="object-cover h-full w-full" :alt="category.name">
+                            <i class="las la-image text-6xl" v-if="! category.preview_url"></i>
+                        </div>
+                        <div class="w-full absolute z-10 -bottom-10">
+                            <div class="cell-item-label relative w-full flex items-center justify-center -top-10 h-20 py-2">
+                                <h3 class="text-sm font-bold py-2 text-center">{{ category.name }}</h3>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div v-if="! hasCategories && ! hasProducts && ! isLoading" class="h-full w-full flex flex-col items-center justify-center">
+                    <i class="las la-frown-open text-8xl text-font"></i>
+                    <p class="w-1/2 md:w-2/3 text-center text-font">
+                        {{ __( 'Looks like there is either no products and no categories. How about creating those first to get started ?' ) }}
+                    </p>
+                    <br>
+                    <ns-link target="blank" type="info" :href="createCategoryUrl">{{ __( 'Create Categories' ) }}</ns-link>
+                </div>
+
+                <div id="grid-products" v-if="! hasCategories" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+                    <div @click="addToTheCart( product )" v-for="product of products" :key="product.id" 
+                        class="cell-item w-full h-36 cursor-pointer border flex flex-col items-center justify-center overflow-hidden relative">
+                        <div class="h-full w-full flex items-center justify-center overflow-hidden">
+                            <img v-if="product.galleries && product.galleries.filter( i => i.featured ).length > 0" :src="product.galleries.filter( i => i.featured )[0].url" class="object-cover h-full w-full" :alt="product.name"/>
+                            <img v-else-if="hasNoFeatured( product )" :src="product.galleries[0].url" class="object-cover h-full w-full" :alt="product.name"/>
+                            <i v-else="! product.galleries || product.galleries.filter( i => i.featured ).length === 0" class="las la-image text-6xl"></i>
+                        </div>
+                        <div class="w-full absolute z-10 -bottom-10">
+                            <div class="cell-item-label relative w-full flex flex-col items-center justify-center -top-10 h-20 p-2">
+                                <h3 class="text-sm text-center w-full">{{ product.name }}</h3>
+                                <template v-if="product.unit_quantities && product.unit_quantities.length === 1">
+                                    <template v-if="options.ns_pos_vat === 'disabled'">
+                                        <span class="text-sm" v-if="product.unit_quantities && product.unit_quantities.length === 1">
+                                            {{ nsCurrency( product.unit_quantities[0].sale_price ) }}
+                                        </span>
+                                    </template>
+                                    <template v-else>
+                                        <span v-if="options.ns_pos_prefered_price === 'gross_prices'" class="text-sm">
+                                            {{ nsCurrency( product.unit_quantities[0].sale_price_gross || product.unit_quantities[0].sale_price ) }}
+                                        </span>
+                                        <span v-else class="text-sm">
+                                            {{ nsCurrency( product.unit_quantities[0].sale_price_net || product.unit_quantities[0].sale_price ) }}
+                                        </span>
+                                    </template>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Products arrive one page at a time, as a category can hold thousands of them. -->
+                <div id="grid-load-more" v-if="! hasCategories && hasMoreProducts" class="p-4 flex flex-col items-center justify-center">
+                    <ns-spinner v-if="isLoadingMore" size="8" border="4"></ns-spinner>
+                    <button
+                        v-else
+                        @click="loadMoreProducts()"
+                        type="button"
+                        data-action="load-more-products"
+                        class="ns-button default rounded px-4 py-2 text-sm">
+                        {{ __( 'Load More' ) }}
+                    </button>
+                    <p class="text-xs text-fontcolor-soft pt-2">{{ loadedProductsLabel }}</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</template>
+<script lang="ts">
+import { nsHttpClient, nsSnackBar } from '../../../bootstrap'
+import switchTo from "~/libraries/pos-section-switch";
+import nsPosSearchProductVue from '~/popups/ns-pos-search-product.vue';
+import { __ } from '~/libraries/lang';
+import { nsCurrency, nsRawCurrency } from '~/filters/currency';
+import NsPosGridWirelessBarcode from './ns-pos-grid-wireless-barcode.vue';
+import { ProductUnitPromise } from './queues/products/product-unit';
+import { Popup } from '~/libraries/popup';
+
+declare const nsNotice;
+
+export default {
+    name: 'ns-pos-grid',
+    data() {
+        return {
+            products: [],
+            pinnedProducts: [],
+            cartProductsSubscribe: null,
+            cartProducts: [],
+            categories: [],
+            breadcrumbs: [],
+            barcode: '',
+            previousCategory: null,
+            order: null,
+            visibleSection: null,
+            breadcrumbsSubsribe: null,
+            orderSubscription: null,
+            visibleSectionSubscriber: null,
+            currentCategory: null,
+            settings: {},
+            settingsSubscriber: null,
+            options: false,
+            optionsSubscriber: null,
+            interval: null,
+            searchTimeout: null,
+            gridItemsWidth: 0,
+            gridItemsHeight:0,
+            isLoading: false,
+            isLoadingMore: false,
+            productsPagination: null,
+            currentCategoryId: null,
+            // ...
+            wirelessStateSubscriber: null,
+            wirelessBarcodeConnected: false,
+            stockUpdateSubscriber: null,
+        }
+    },
+    computed: {
+        hasCategories() {
+            return this.categories.length > 0;
+        },
+        hasProducts() {
+            return this.products.length > 0;
+        },
+        hasMoreProducts() {
+            if ( this.productsPagination === null ) {
+                return false;
+            }
+
+            return this.productsPagination.current_page < this.productsPagination.last_page;
+        },
+        loadedProductsLabel() {
+            if ( this.productsPagination === null ) {
+                return '';
+            }
+
+            return __( '{loaded} of {total} products' )
+                .replace( '{loaded}', this.products.length )
+                .replace( '{total}', this.productsPagination.total );
+        },
+        createCategoryUrl() {
+            // link to create category defined on OrdersController.
+            return POS.settings.getValue().urls.categories_url; 
+        }
+    },
+    components: {
+        'ns-pos-grid-wireless-barcode': NsPosGridWirelessBarcode,
+    },
+    watch: {
+        options: {
+            handler( oldVal, newVal ) {
+                if ( this.options.ns_pos_force_autofocus ) {
+                    clearTimeout( this.searchTimeout );
+
+                    this.searchTimeout  =   setTimeout( () => {
+                        this.submitSearch( this.barcode );
+                    }, 200 );
+                }
+            },
+            deep: true
+        },
+        barcode() {
+            if ( this.options.ns_pos_force_autofocus ) {
+                clearTimeout( this.searchTimeout );
+
+                this.searchTimeout  =   setTimeout( () => {
+                    this.submitSearch( this.barcode );
+                }, 200 );
+            }
+        }
+    },
+    mounted() {
+        this.loadCategories();
+
+        this.settingsSubscriber         =   POS.settings.subscribe( settings => {
+            this.settings               =   settings;
+            this.$forceUpdate();
+        });
+
+        this.wirelessStateSubscriber   =   POS.wirelessBarcodeState.property( 'barcode' ).subscribe( state => {
+            if ( typeof state === "string" && state.length > 0 ) {
+                this.submitSearch( state );
+            }
+        });
+
+        /**
+         * A sale on another till changes what this one may sell. The grid caches the
+         * category payload once, so without this the tiles keep showing the quantity
+         * that was true when the category was opened.
+         */
+        this.stockUpdateSubscriber      =   POS.stockUpdate.subscribe( update => {
+            if ( update !== null ) {
+                this.applyStockUpdate( update );
+            }
+        });
+
+        this.optionsSubscriber          =   POS.options.subscribe( options => {
+            this.options                =   options;
+            this.$forceUpdate();
+        });
+
+        this.breadcrumbsSubsribe        =   POS.breadcrumbs.subscribe( ( breadcrumbs ) => {
+            this.breadcrumbs            =   breadcrumbs;
+            this.$forceUpdate();
+        });
+        this.visibleSectionSubscriber   =   POS.visibleSection.subscribe( section => {
+            this.visibleSection      =   section;
+            this.$forceUpdate();
+        });
+
+        this.cartProductsSubscribe  =   POS.products.subscribe( products => {
+            this.cartProducts              =   products;
+            this.$forceUpdate();
+        });
+
+        this.orderSubscription      =   POS.order.subscribe( order => this.order = order );
+
+        this.interval   =   setInterval( () => this.checkFocus(), 500 );
+
+        /**
+         * let's register hotkeys
+         */
+        for( let shortcut in nsShortcuts ) {
+            /**
+             * let's declare only shortcuts that
+             * works on the pos grid and that doesn't
+             * expect any popup to be visible
+             */
+            if ([
+                    'ns_pos_keyboard_quick_search',
+                ].includes( shortcut ) ) {
+                nsHotPress
+                    .create( 'search-popup' )
+                    .whenNotVisible([ '.is-popup', '#product-search' ])
+                    .whenPressed( nsShortcuts[ shortcut ] !== null ? nsShortcuts[ shortcut ].join( '+' ) : null, ( event ) => {
+                        event.preventDefault();
+                        this.openSearchPopup();
+                });
+            }
+
+            /**
+             * let's declare only shortcuts that
+             * works on the pos grid and that doesn't
+             * expect any popup to be visible
+             */
+            if ([
+                    'ns_pos_keyboard_toggle_merge',
+                ].includes( shortcut ) ) {
+                nsHotPress
+                    .create( 'toggle-merge' )
+                    .whenNotVisible([ '.is-popup' ])
+                    .whenPressed( nsShortcuts[ shortcut ] !== null ? nsShortcuts[ shortcut ].join( '+' ) : null, ( event ) => {
+                        event.preventDefault();
+                        this.posToggleMerge();
+                });
+            }
+        }
+
+        /**
+         * We'll apply a reset on the barcode value. This will ensure
+         * similar barcode scan will work
+         */
+        nsHooks.addAction( 'ns-after-cart-changed', 'ns-pos-grid', () => {
+            POS.wirelessBarcodeState.update({
+                barcode: ''
+            });
+        })
+    },
+    unmounted() {
+        this.orderSubscription.unsubscribe();
+        this.breadcrumbsSubsribe.unsubscribe();
+        this.visibleSectionSubscriber.unsubscribe();
+        this.settingsSubscriber.unsubscribe();
+        this.optionsSubscriber.unsubscribe();
+        this.cartProductsSubscribe.unsubscribe();
+        this.wirelessStateSubscriber.unsubscribe();
+        this.stockUpdateSubscriber.unsubscribe();
+
+        clearInterval( this.interval );
+
+        nsHotPress.destroy( 'search-popup' );
+        nsHotPress.destroy( 'toggle-merge' );
+    },
+    methods: {
+        __, 
+        nsCurrency,
+
+        switchTo,
+
+        posToggleMerge() {
+            POS.set( 'ns_pos_items_merge', ! this.settings.ns_pos_items_merge );
+        },
+
+        /**
+         * Patches the quantity of one unit on the tiles currently on screen.
+         *
+         * Only the matching unit quantity is touched. Reloading the category instead
+         * would be simpler but would fight the cashier: it resets scroll position and
+         * can happen several times a second in a busy shop.
+         */
+        applyStockUpdate( update ) {
+            const patch     =   ( collection ) => {
+                let changed =   false;
+
+                collection.forEach( product => {
+                    if ( product.id !== update.product_id || ! product.unit_quantities ) {
+                        return;
+                    }
+
+                    product.unit_quantities.forEach( unitQuantity => {
+                        if ( unitQuantity.id === update.unit_quantity_id ) {
+                            unitQuantity.quantity   =   update.quantity;
+                            changed                 =   true;
+                        }
+                    });
+                });
+
+                return changed;
+            };
+
+            if ( patch( this.products ) || patch( this.pinnedProducts ) ) {
+                this.$forceUpdate();
+            }
+        },
+
+        /**
+         * @deprecated
+         */
+        computeGridWidth() {
+            if ( document.getElementById( 'grid-items' ) !== null ) {
+                this.gridItemsWidth     =   document.getElementById( 'grid-items' ).offsetWidth;
+                this.gridItemsHeight    =   document.getElementById( 'grid-items' ).offsetHeight;
+            }
+        },
+
+        cellSizeAndPositionGetter(item, index) {
+            const responsive    =   {
+                xs: {
+                    width: this.gridItemsWidth / 2,
+                    items: 2,
+                    height: 200,
+                },
+                sm: {
+                    width: this.gridItemsWidth / 2,
+                    items: 2,
+                    height: 200,
+                },
+                md: {
+                    width: this.gridItemsWidth / 3,
+                    items: 3,
+                    height: 150,
+                },
+                lg: {
+                    width: this.gridItemsWidth / 4,
+                    items: 4,
+                    height: 150,
+                },
+                xl: {
+                    width: this.gridItemsWidth / 6,
+                    items: 6,
+                    height: 150,
+                }
+            }
+
+            const wrapperWidth  =   responsive[ POS.responsive.screenIs ].width;
+            const wrapperHeight =   responsive[ POS.responsive.screenIs ].height;
+            const scrollWidth   =   0; // ( 50 / responsive[ POS.responsive.screenIs ].items );
+
+            return {
+                width: wrapperWidth - scrollWidth,
+                height: wrapperHeight,
+                x: ( ( index % responsive[ POS.responsive.screenIs ].items ) * ( wrapperWidth ) ) - scrollWidth,
+                y: parseInt( index / responsive[ POS.responsive.screenIs ].items ) * wrapperHeight
+            }
+        },
+
+        openSearchPopup() {
+            Popup.show( nsPosSearchProductVue );
+        },
+
+        hasNoFeatured( product ) {
+            return product.galleries && product.galleries.length > 0 && product.galleries.filter( i => i.featured ).length === 0;
+        },
+
+        submitSearch( value ) {
+            if ( value.length > 0 ) {
+                const url   =   nsHooks.applyFilters( 'ns-pos-submit-search-url', `/api/products/search/using-barcode/${ value }`, value );
+
+                nsHttpClient.get( url )
+                    .subscribe({
+                        next: async (result: any) => {
+                            this.barcode    =   '';
+                            const product   =   {};
+
+                            /**
+                             * it might happen, but in case the unit is not defined,
+                             * if we have enough information, we can display a popup for showing
+                             * the user to select a unit quantity. This is the case for products with multiple unit quantities.
+                             */
+                            if ( result.unit === null && result.product.id ) {
+                                const fetchUnitPromise = new ProductUnitPromise({
+                                    $original: () => {
+                                        return result.product;
+                                    }, 
+                                });
+
+                                try {
+                                    const fetchResult = <{ unit_quantity_id: number, unit_name: string, $quantities: () => any }>(await fetchUnitPromise.run());
+                                    const unitQuantityId = fetchResult.unit_quantity_id;
+                                    result.unitQuantity = result.product.unit_quantities.find( uq => uq.id === unitQuantityId );
+                                    result.unit = result.unitQuantity.unit;
+                                } catch ( error ) {
+                                    return nsSnackBar.error( __( 'An unexpected error occurred while fetching the unit quantity for this product.' ) );
+                                }
+                            }
+
+                            product.name                    =   result.product.name;
+                            product.id                      =   result.product.id;
+                            product.product_type            =   result.product.product_type;
+                            product.rate                    =   result.product.rate;
+                            product.tax_group_id            =   result.product.tax_group_id;
+                            product.tax_type                =   result.product.tax_type;
+                            product.unit_id                 =   result.unit.id;
+                            product.unit_price              =   result.unitQuantity.sale_price;
+                            product.price_gross             =   result.unitQuantity.sale_price_gross;
+                            product.price_net               =   result.unitQuantity.sale_price_net;
+                            product.unit_name               =   result.unit.name;
+                            product.unitQuantity            =   result.unitQuantity;
+                            
+                            /**
+                             * Show the product info popup instead of auto-adding to the
+                             * cart, so the cashier can verify the price first.
+                             */
+                            let scaleInfo = null;
+
+                            // Check if this is a scale barcode with embedded data
+                            if ( result.scale ) {
+                                scaleInfo = result.scale;
+                            }
+
+                            import('~/popups/ns-pos-product-info.vue').then( component => {
+                                Popup.show( component.default, {
+                                    product: product,
+                                    scaleInfo: scaleInfo
+                                });
+                            }).catch( () => {
+                                nsSnackBar.error( __( 'Unable to load the product details popup.' ) );
+                            });
+                        },
+                        error: ( error ) => {
+                            this.barcode     =   '';
+                            nsSnackBar.error( error.message );
+                        }
+                    })
+            }
+        },
+
+        checkFocus() {
+            if ( this.options.ns_pos_force_autofocus ) {
+                const popup     =   document.querySelectorAll( '.is-popup' );
+
+                /**
+                 * We don't force focus if
+                 * any popup is visible.
+                 */
+                if ( popup.length === 0 ) {
+                    this.$refs.search.focus();
+                }
+            }
+        },
+
+        loadCategories( parent ) {
+            this.isLoading              =   true;
+            this.currentCategoryId      =   parent ? parent.id : null;
+            this.productsPagination     =   null;
+
+            nsHttpClient.get( `/api/categories/pos/${ parent ? parent.id : ''}` )
+                .subscribe({
+                    next: (result ) => {
+                        this.categories         =   result.categories;
+                        this.products           =   result.products;
+                        this.pinnedProducts     =   result.pinnedProducts || [];
+                        this.previousCategory   =   result.previousCategory;
+                        this.currentCategory    =   result.currentCategory;
+                        this.productsPagination =   result.productsPagination || null;
+                        this.updateBreadCrumb( this.currentCategory );
+                        this.isLoading  =   false;
+                    },
+                    error: ( error ) => {
+                        this.isLoading  =   false;
+                        return nsSnackBar.error( __( 'An unexpected error occurred.' ) );
+                    }
+                });
+        },
+
+        /**
+         * Appends the next page of products of the category being browsed.
+         */
+        loadMoreProducts() {
+            if ( this.isLoadingMore || ! this.hasMoreProducts || this.currentCategoryId === null ) {
+                return;
+            }
+
+            this.isLoadingMore  =   true;
+
+            const nextPage      =   this.productsPagination.current_page + 1;
+
+            nsHttpClient.get( `/api/categories/pos/${ this.currentCategoryId }?page=${ nextPage }` )
+                .subscribe({
+                    next: ( result ) => {
+                        /**
+                         * The category might have been left while the request
+                         * was in flight, in which case the result is stale.
+                         */
+                        if ( result.currentCategory && result.currentCategory.id === this.currentCategoryId ) {
+                            this.products           =   this.products.concat( result.products );
+                            this.productsPagination =   result.productsPagination || null;
+                        }
+
+                        this.isLoadingMore  =   false;
+                    },
+                    error: () => {
+                        this.isLoadingMore  =   false;
+                        return nsSnackBar.error( __( 'An unexpected error occurred.' ) );
+                    }
+                });
+        },
+
+
+
+        updateBreadCrumb( parent ) {
+            if ( parent ) {
+                const index     =   this.breadcrumb.filter( bread => bread.id === parent.id );
+
+                /**
+                 * this means, we're trying to navigate
+                 * through something that has already been
+                 * added to the breadcrumb
+                 */
+                if ( index.length > 0 ) {
+                    let allow       =   true;
+                    const prior     =   this.breadcrumb.filter( bread => {
+                        if ( bread.id === index[0].id && allow ) {
+                            allow   =   false;
+                            return true;
+                        }
+
+                        return allow;
+                    });
+                    this.breadcrumb     =   prior;
+                } else {
+                    this.breadcrumb.push( parent );
+                }
+
+            } else {
+                this.breadcrumb     =   [];
+            }
+
+            POS.breadcrumbs.next( this.breadcrumb );
+        },
+
+        addToTheCart( product ) {
+            POS.addToCart( product );
+        },
+
+        inviteToMyRGBFConnexion() {
+            nsNotice.info( 
+                __( 'Authentication Required' ),
+                __( 'You need to connect your installation to My RGBF for using websocket features.' ), {
+                actions: {
+                    close: {
+                        type: 'info',
+                        label: __( 'No thanks' ),
+                    },
+                    confirm: {
+                        label: __( 'Continue' ),
+                        type: 'error',
+                        onClick: ( instance ) => {
+                            const settings  =   POS.settings.getValue();
+                            document.location = settings.urls.marketplace_url;
+                        }
+                    }
+                }
+            })
+        }
+    }
+}
+</script>

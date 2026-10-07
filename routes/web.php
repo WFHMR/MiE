@@ -1,0 +1,97 @@
+<?php
+
+use App\Classes\FormInput;
+use App\Classes\Wizard;
+use App\Events\BeforeStartWebRouteEvent;
+use App\Http\Controllers\DevController;
+use App\Services\WizardService;
+use Illuminate\Support\Facades\Route;
+
+/*
+|--------------------------------------------------------------------------
+| Web Routes
+|--------------------------------------------------------------------------
+|
+| Here is where you can register web routes for your application. These
+| routes are loaded by the RouteServiceProvider within a group which
+| contains the "web" middleware group. Now create something great!
+|
+*/
+
+$domain = pathinfo( env( 'APP_URL' ) );
+
+/**
+ * If something has to happen
+ * before the web routes are saved
+ * this will be performmed here.
+ */
+BeforeStartWebRouteEvent::dispatch();
+
+/**
+ * By default, wildcard is disabled
+ * on the system. In order to enable it, the user
+ * will have to follow these instructions #
+ */
+if ( env( 'NS_WILDCARD_ENABLED' ) ) {
+    /**
+     * The defined route should only be applicable
+     * to the main domain.
+     */
+    $domainString = ( $domain[ 'filename' ] ?: 'localhost' ) . ( isset( $domain[ 'extension' ] ) ? '.' . $domain[ 'extension' ] : '' );
+
+    Route::domain( $domainString )->group( function () {
+        include dirname( __FILE__ ) . DIRECTORY_SEPARATOR . 'web-base.php';
+    } );
+} else {
+    include dirname( __FILE__ ) . DIRECTORY_SEPARATOR . 'web-base.php';
+}
+
+if ( env( 'APP_DEBUG' ) ) {
+    /**
+     * This is made to redirect to
+     * vue server. For some reason we're unable to
+     * configure that correctly on vite.config.js
+     */
+    Route::get( '__vite_ping', function () {
+        $filePath = base_path( 'public/hot' );
+
+        if ( file_exists( $filePath ) ) {
+            return redirect( file_get_contents( $filePath ) . '/__vite_ping' );
+        }
+    } );
+
+    /**
+     * For local Vue 3 components development
+     * those routes are registered.
+     */
+    Route::get( '__dev__', [ DevController::class, 'index' ] );
+
+    include dirname( __FILE__ ) . '/debug.php';
+
+    /**
+     * Demonstrates the wizard service. This used to sit outside the debug block,
+     * which published an unauthenticated example page on production sites.
+     */
+    Route::get( 'wizard', function () {
+        $wizard = new WizardService(
+            title: 'Example',
+            description: 'This is an example of how to use the wizard service',
+            steps: Wizard::steps(
+                Wizard::step(
+                    completed: false,
+                    title: 'Configuration',
+                    description: 'Configure your application',
+                    fields: Wizard::fields(
+                        FormInput::text(
+                            label: 'Name',
+                            name: 'name',
+                            value: 'RGBF'
+                        )
+                    )
+                )
+            )
+        );
+
+        return $wizard->render();
+    } );
+}

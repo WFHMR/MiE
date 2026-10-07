@@ -1,0 +1,79 @@
+<?php
+
+/**
+ * Table Migration
+ **/
+
+use App\Classes\Schema;
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+
+return new class extends Migration
+{
+    /**
+     * Run the migrations.
+     *
+     * @return void
+     */
+    public function up()
+    {
+        if ( ! Schema::hasTable( 'nexopos_orders_products' ) ) {
+            Schema::createIfMissing( 'nexopos_orders_products', function ( Blueprint $table ) {
+                $table->bigIncrements( 'id' );
+                $table->string( 'name' );
+                $table->string( 'unit_name' )->nullable();
+                $table->string( 'mode' )->default( 'normal' ); //
+                $table->string( 'product_type' )->default( 'product' ); // group
+                $table->integer( 'product_id' );
+                $table->integer( 'order_id' );
+                $table->integer( 'unit_id' );
+                $table->integer( 'unit_quantity_id' );
+                $table->integer( 'product_category_id' );
+                $table->integer( 'procurement_product_id' )->nullable();
+                $table->integer( 'tax_group_id' )->default( 0 );
+                $table->string( 'tax_type' )->default( 0 );
+
+                /**
+                 * Frozen at the moment of the sale so a reprinted tax invoice always
+                 * shows the VAT that was actually charged, even after the rate or the
+                 * product classification changes. @since v6.3.0
+                 */
+                $table->string( 'vat_status' )->default( 'standard' ); // standard, exempt, zero_rated
+                $table->decimal( 'vat_rate', 8, 4 )->default( 0 );
+
+                $table->string( 'uuid' )->nullable();
+                $table->string( 'status' )->default( 'sold' ); // sold, refunded
+                $table->text( 'return_observations' )->nullable();
+                $table->string( 'return_condition' )->nullable();
+                $table->string( 'discount_type' )->default( 'none' );
+                $table->decimal( 'discount', 18, 5 )->default( 0 );
+                $table->decimal( 'quantity', 18, 5 ); // could be the base unit
+                $table->decimal( 'discount_percentage', 18, 5 )->default( 0 );
+                $table->decimal( 'unit_price', 18, 5 )->default( 0 );
+                $table->decimal( 'price_gross', 18, 5 )->default( 0 );
+                $table->decimal( 'price_net', 18, 5 )->default( 0 );
+                $table->decimal( 'wholesale_tax_value', 18, 5 )->default( 0 );
+                $table->decimal( 'sale_tax_value', 18, 5 )->default( 0 );
+                $table->decimal( 'tax_value', 18, 5 )->default( 0 );
+                $table->decimal( 'rate', 18, 5 )->default( 0 );
+                $table->decimal( 'total_price', 18, 5 )->default( 0 );
+                $table->decimal( 'total_price_gross', 18, 5 )->default( 0 );
+                $table->decimal( 'total_price_net', 18, 5 )->default( 0 );
+                $table->decimal( 'total_purchase_price', 18, 5 )->default( 0 );
+                $table->timestamps();
+            } );
+        }
+    }
+
+    /**
+     * Reverse the migrations.
+     *
+     * @return void
+     */
+    public function down()
+    {
+        if ( Schema::hasTable( 'nexopos_orders_products' ) ) {
+            Schema::dropIfExists( 'nexopos_orders_products' );
+        }
+    }
+};

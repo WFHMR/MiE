@@ -1,0 +1,37 @@
+<?php
+
+namespace App\Models;
+
+use Carbon\Carbon;
+
+/**
+ * @property int    $id
+ * @property string $uuid
+ * @property int    $author_id
+ * @property bool   $featured
+ * @property Carbon $updated_at
+ */
+class ProductGallery extends NsModel
+{
+    protected $table = 'nexopos_products_galleries';
+
+    protected $fillable = [
+        'name',
+        'product_id',
+        'media_id',
+        'url',
+        'order',
+        'featured',
+        'author_id',
+    ];
+
+    public $casts = [
+        'featured' => 'boolean',
+        'product_id' => 'integer',
+    ];
+
+    public function product()
+    {
+        return $this->belongsTo( Product::class );
+    }
+}

@@ -1,0 +1,78 @@
+<?php
+
+namespace App\Models;
+
+use App\Classes\Model;
+use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+
+/**
+ * @property int    $id
+ * @property string $uuid
+ * @property int    $author_id
+ * @property int    $scale_range_id
+ * @property bool   $displays_on_pos
+ * @property string $description
+ * @property Carbon $updated_at
+ */
+class ProductCategory extends NsModel
+{
+    use HasFactory;
+
+    protected $guarded = [];
+
+    protected $table = 'nexopos_' . 'products_categories';
+
+    public function setDependencies()
+    {
+        return [
+            Product::class => Model::dependant(
+                local_name: 'name',
+                local_index: 'id',
+                foreign_name: 'name',
+                foreign_index: 'category_id',
+            ),
+            self::class => Model::dependant(
+                local_name: 'name',
+                local_index: 'id',
+                foreign_name: 'name',
+                foreign_index: 'parent_id',
+            ),
+        ];
+    }
+
+    public function scopeDisplayOnPOS( $query, $attribute = true )
+    {
+        return $query->where( 'displays_on_pos', $attribute );
+    }
+
+    public function products()
+    {
+        return $this->hasMany( Product::class, 'category_id' );
+    }
+
+    /**
+     * Get the scale range associated with this category
+     */
+    public function scaleRange()
+    {
+        return $this->belongsTo( ScaleRange::class, 'scale_range_id' );
+    }
+
+    /**
+     * create relation to the
+     * user model
+     */
+    public function author()
+    {
+        return $this->belongsTo( User::class );
+    }
+
+    /**
+     * get category sub categories
+     */
+    public function subCategories()
+    {
+        return $this->hasMany( self::class, 'parent_id' );
+    }
+}
